@@ -143,6 +143,7 @@ fn record_events(
             GameEvent::Victory => "Victory! Press r to restart.".to_owned(),
             GameEvent::ItemPickedUp { .. } => "Picked up item.".to_owned(),
             GameEvent::ItemUsed { .. } => "Used item.".to_owned(),
+            GameEvent::FloorChanged { floor } => format!("Entered floor {floor}."),
             GameEvent::Message(text) => text,
             GameEvent::EntityMoved { .. } | GameEvent::TurnStarted { .. } => continue,
         };

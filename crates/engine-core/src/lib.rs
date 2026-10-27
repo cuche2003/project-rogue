@@ -24,7 +24,7 @@ pub use content::{
 };
 pub use event::GameEvent;
 pub use map::{GameMap, Position, Tile};
-use resources::{Content, Events, GroundItems, Inventory, PlayerEntity, TurnCommand};
+use resources::{Content, Events, Floor, GroundItems, Inventory, PlayerEntity, TurnCommand};
 pub use resources::{GameConfig, Map, NextEntityId, Phase, Turn};
 pub use snapshot::{
     EntitySnapshot, HealthSnapshot, ItemSnapshot, MapSnapshot, PlayerSnapshot, RenderSnapshot,
@@ -120,13 +120,13 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Creates a run. Panics for invalid dimensions; use `try_new` for untrusted configuration.
+    /// Creates a run. Panics for invalid configuration; use `try_new` for untrusted configuration.
     #[must_use]
     pub fn new(config: GameConfig) -> Self {
         Self::with_content(config, ContentPack::core()).expect("built-in content is valid")
     }
 
-    /// Validates dimensions and built-in content before allocating or generating a dungeon.
+    /// Validates configuration and built-in content before allocating or generating a dungeon.
     pub fn try_new(config: GameConfig) -> Result<Self, ConfigError> {
         Self::with_content(config, ContentPack::core()).map_err(|error| match error {
             EngineError::Config(error) => error,
@@ -141,6 +141,9 @@ impl Engine {
     /// Creates a run with validated host or mod content.
     pub fn with_content(config: GameConfig, content: ContentPack) -> Result<Self, EngineError> {
         if !(8..=256).contains(&config.map_width) || !(8..=256).contains(&config.map_height) {
+            return Err(ConfigError.into());
+        }
+        if config.floor_count == 0 {
             return Err(ConfigError.into());
         }
         let (map, start, _enemy_position) = generation::generate(config);
@@ -193,6 +196,7 @@ impl Engine {
             .collect::<Vec<_>>();
         let mut world = World::new();
         world.insert_resource(Turn::default());
+        world.insert_resource(Floor(1));
         world.insert_resource(Phase(GamePhase::Playing));
         world.insert_resource(Map(map));
         world.insert_resource(Events::default());
@@ -327,6 +331,10 @@ impl Engine {
         if let Err(error) = systems::validate(&mut self.world, command) {
             return CommandResult::Rejected(error);
         }
+        if command == Command::Descend {
+            self.descend();
+            return CommandResult::Applied;
+        }
         let pending = self.drain_events();
         let mut observed = self.observed_entities();
         self.world.insert_resource(TurnCommand(command));
@@ -353,6 +361,128 @@ impl Engine {
         self.world.resource_mut::<Events>().0 = pending;
         self.world.resource_mut::<Events>().0.extend(filtered);
         CommandResult::Applied
+    }
+
+    fn descend(&mut self) {
+        let current_floor = self.world.resource::<Floor>().0;
+        if current_floor >= self.config.floor_count {
+            self.world.resource_mut::<Turn>().0 += 1;
+            self.world.resource_mut::<Phase>().0 = GamePhase::Victory;
+            self.world
+                .resource_mut::<Events>()
+                .0
+                .push(GameEvent::Victory);
+            return;
+        }
+
+        let next_floor = current_floor + 1;
+        let (map, start, _) = generation::generate_floor(self.config, next_floor);
+        let mut spawn_positions: Vec<_> = map
+            .tiles()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, tile)| {
+                (*tile == Tile::Floor).then_some(Position {
+                    x: (index % usize::from(map.width())) as i32,
+                    y: (index / usize::from(map.width())) as i32,
+                })
+            })
+            .filter(|position| *position != start)
+            .collect();
+        spawn_positions.sort_unstable_by_key(|position| {
+            std::cmp::Reverse(position.x.abs_diff(start.x) + position.y.abs_diff(start.y))
+        });
+
+        let requested_actors: usize = self
+            .content
+            .spawns()
+            .iter()
+            .map(|spawn| spawn.count as usize)
+            .sum();
+        let requested_items: usize = self
+            .content
+            .item_spawns()
+            .iter()
+            .map(|spawn| spawn.count as usize)
+            .sum();
+        if spawn_positions.len() < requested_actors + requested_items {
+            self.world.resource_mut::<Turn>().0 += 1;
+            self.world
+                .resource_mut::<Events>()
+                .0
+                .push(GameEvent::Message("Floor generation failed.".to_owned()));
+            return;
+        }
+
+        let player = self.player;
+        let old_entities: Vec<_> = self
+            .world
+            .query::<(Entity, &Enemy)>()
+            .iter(&self.world)
+            .map(|(entity, _)| entity)
+            .collect();
+        for entity in old_entities {
+            self.world.despawn(entity);
+        }
+        self.world.insert_resource(Map(map));
+        self.world.insert_resource(Floor(next_floor));
+        self.world.insert_resource(GroundItems::default());
+        self.world.entity_mut(player).insert(GridPosition(start));
+
+        let mut ids = self
+            .world
+            .remove_resource::<NextEntityId>()
+            .expect("entity ID allocator");
+        let mut actor_index = 0;
+        for spawn in self.content.spawns() {
+            let actor = self
+                .content
+                .actor(&spawn.actor_id)
+                .expect("validated spawn actor");
+            for _ in 0..spawn.count {
+                let position = spawn_positions[actor_index];
+                actor_index += 1;
+                self.world.spawn((
+                    Enemy,
+                    Behavior(actor.behavior),
+                    AttackDamage(actor.attack_damage),
+                    Identity(ids.allocate()),
+                    GridPosition(position),
+                    Health {
+                        current: actor.max_health,
+                        maximum: actor.max_health,
+                    },
+                    Display {
+                        glyph: actor.glyph,
+                        name: actor.name.clone(),
+                    },
+                    BlocksMovement,
+                ));
+            }
+        }
+
+        let item_positions = spawn_positions.into_iter().skip(requested_actors);
+        let ground_items = self
+            .content
+            .item_spawns()
+            .iter()
+            .flat_map(|spawn| (0..spawn.count).map(|_| spawn.item_id.clone()))
+            .zip(item_positions)
+            .map(|(item_id, position)| resources::GroundItem {
+                id: ids.allocate(),
+                item_id,
+                position,
+                quantity: 1,
+            })
+            .collect();
+        self.world.insert_resource(GroundItems(ground_items));
+        self.world.insert_resource(ids);
+        self.world.resource_mut::<Turn>().0 += 1;
+        systems::update_visibility(&mut self.world);
+        self.world
+            .resource_mut::<Events>()
+            .0
+            .push(GameEvent::FloorChanged { floor: next_floor });
     }
 
     fn observed_entities(&self) -> std::collections::HashSet<EntityId> {
@@ -422,6 +552,8 @@ impl Engine {
         RenderSnapshot {
             phase: self.world.resource::<Phase>().0,
             turn: self.turn(),
+            floor: self.world.resource::<Floor>().0,
+            floor_count: self.config.floor_count,
             seed: self.seed(),
             map: MapSnapshot {
                 width: map.width(),

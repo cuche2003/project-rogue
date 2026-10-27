@@ -68,7 +68,10 @@ pub fn draw(frame: &mut Frame, snapshot: &RenderSnapshot, messages: &VecDeque<St
                 ),
                 Span::raw(format!(" | Turn {}", snapshot.turn)),
             ]),
-            Line::from(format!("{} | {}", phase, inventory)),
+            Line::from(format!(
+                "{} | F{}/{} | {}",
+                phase, snapshot.floor, snapshot.floor_count, inventory
+            )),
         ]),
         status,
     );
@@ -184,6 +187,8 @@ mod tests {
         RenderSnapshot {
             phase: GamePhase::Playing,
             turn: 7,
+            floor: 1,
+            floor_count: 3,
             seed: 0,
             map: MapSnapshot {
                 width: 8,

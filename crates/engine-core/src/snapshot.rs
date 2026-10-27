@@ -5,6 +5,8 @@ use crate::{EntityId, GamePhase, Position, Tile};
 pub struct RenderSnapshot {
     pub phase: GamePhase,
     pub turn: u64,
+    pub floor: u16,
+    pub floor_count: u16,
     pub seed: u64,
     pub map: MapSnapshot,
     pub entities: Vec<EntitySnapshot>,

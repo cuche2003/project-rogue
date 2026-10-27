@@ -8,6 +8,9 @@ pub const INVENTORY_SLOTS: usize = 9;
 #[derive(Debug, Default, Resource)]
 pub struct Turn(pub u64);
 
+#[derive(Debug, Default, Resource)]
+pub(crate) struct Floor(pub u16);
+
 /// Current game phase.
 #[derive(Debug, Resource)]
 pub struct Phase(pub GamePhase);
@@ -22,6 +25,7 @@ pub struct GameConfig {
     pub seed: u64,
     pub map_width: u16,
     pub map_height: u16,
+    pub floor_count: u16,
 }
 
 impl Default for GameConfig {
@@ -30,6 +34,7 @@ impl Default for GameConfig {
             seed: 0,
             map_width: 40,
             map_height: 20,
+            floor_count: 3,
         }
     }
 }

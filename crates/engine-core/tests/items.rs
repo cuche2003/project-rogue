@@ -38,6 +38,7 @@ fn engine(items: Vec<ItemDefinition>, item_spawns: Vec<ItemSpawnDefinition>) -> 
             seed: 0,
             map_width: 8,
             map_height: 8,
+            floor_count: 1,
         },
         content(items, item_spawns),
     )
@@ -206,6 +207,7 @@ fn full_inventory_rejects_new_item_but_allows_existing_stack() {
                     seed,
                     map_width: 8,
                     map_height: 8,
+                    floor_count: 1,
                 },
                 content,
             )

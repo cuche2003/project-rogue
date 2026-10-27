@@ -389,9 +389,6 @@ fn outcome(world: &mut World) {
             .resource_mut::<Events>()
             .0
             .extend([GameEvent::EntityDied { entity: id }, GameEvent::Defeat]);
-    } else if world.resource::<TurnCommand>().0 == Command::Descend {
-        world.resource_mut::<Phase>().0 = GamePhase::Victory;
-        world.resource_mut::<Events>().0.push(GameEvent::Victory);
     }
 }
 

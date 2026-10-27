@@ -25,6 +25,9 @@ pub enum GameEvent {
     ItemUsed {
         item: EntityId,
     },
+    FloorChanged {
+        floor: u16,
+    },
     Message(String),
     Victory,
     Defeat,

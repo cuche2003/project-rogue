@@ -111,6 +111,35 @@ fn generated_runs_can_fight_reach_stairs_win_and_restart() {
             }
         }
         assert_eq!(engine.dispatch(Command::Descend), CommandResult::Applied);
+        assert_eq!(engine.snapshot().phase, GamePhase::Playing);
+        assert_eq!(engine.snapshot().floor, 2);
+        while engine.snapshot().phase == GamePhase::Playing {
+            let stairs = engine
+                .world()
+                .resource::<Map>()
+                .0
+                .tiles()
+                .iter()
+                .enumerate()
+                .find_map(|(index, tile)| {
+                    (*tile == Tile::StairsDown).then_some(Position {
+                        x: (index % usize::from(engine.snapshot().map.width)) as i32,
+                        y: (index / usize::from(engine.snapshot().map.width)) as i32,
+                    })
+                })
+                .unwrap();
+            let player = engine
+                .world()
+                .iter_entities()
+                .find(|entity| entity.get::<project_rogue_engine_core::Player>().is_some())
+                .unwrap()
+                .id();
+            engine
+                .world_mut()
+                .entity_mut(player)
+                .insert(GridPosition(stairs));
+            assert_eq!(engine.dispatch(Command::Descend), CommandResult::Applied);
+        }
         assert_eq!(engine.snapshot().phase, GamePhase::Victory);
         engine.dispatch(Command::Restart);
         assert_eq!(engine.snapshot(), initial);

@@ -283,14 +283,15 @@ fn stairs_are_walkable_and_descent_wins_without_enemy_retaliation() {
         .current = 1;
     engine.drain_events();
     assert_eq!(engine.dispatch(Command::Descend), CommandResult::Applied);
-    assert_eq!(engine.drain_events(), vec![GameEvent::Victory]);
-    assert_eq!(engine.snapshot().phase, GamePhase::Victory);
+    assert_eq!(
+        engine.drain_events(),
+        vec![GameEvent::FloorChanged { floor: 2 }]
+    );
+    assert_eq!(engine.snapshot().phase, GamePhase::Playing);
+    assert_eq!(engine.snapshot().floor, 2);
     assert_eq!(engine.snapshot().player.health.current, 1);
     assert_eq!(engine.turn(), 2);
-    assert_eq!(
-        engine.dispatch(Command::Wait),
-        CommandResult::Rejected(CommandError::GameOver)
-    );
+    assert_eq!(engine.dispatch(Command::Wait), CommandResult::Applied);
 }
 
 #[test]
@@ -299,6 +300,7 @@ fn restart_reproduces_seed_dimensions_state_and_empty_events() {
         seed: 42,
         map_width: 32,
         map_height: 18,
+        floor_count: 3,
     };
     let mut engine = Engine::new(config);
     let initial = engine.snapshot();

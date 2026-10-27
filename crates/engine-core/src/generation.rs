@@ -5,7 +5,16 @@ use crate::{GameConfig, GameMap, Position, Tile};
 
 /// Generate connected rooms inside a solid wall border. Dimensions are validated by the caller.
 pub(crate) fn generate(config: GameConfig) -> (GameMap, Position, Position) {
-    let mut rng = ChaCha8Rng::seed_from_u64(config.seed);
+    generate_floor(config, 1)
+}
+
+pub(crate) fn generate_floor(config: GameConfig, floor: u16) -> (GameMap, Position, Position) {
+    let seed = if floor == 1 {
+        config.seed
+    } else {
+        config.seed ^ u64::from(floor).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+    };
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let mut map = GameMap::new(config.map_width, config.map_height, Tile::Wall);
     let width = i32::from(config.map_width) - 2;
     let height = i32::from(config.map_height) - 2;
@@ -131,6 +140,7 @@ mod tests {
                 seed: 0,
                 map_width,
                 map_height,
+                floor_count: 1,
             });
             let mut terrain_changed = false;
             for seed in 0..64 {
@@ -138,6 +148,7 @@ mod tests {
                     seed,
                     map_width,
                     map_height,
+                    floor_count: 1,
                 };
                 let generated = generate(config);
                 assert_eq!(generated, generate(config), "config: {config:?}");
@@ -163,6 +174,7 @@ mod tests {
                     seed,
                     map_width,
                     map_height,
+                    floor_count: 1,
                 };
                 let (map, player, enemy) = generate(config);
                 assert_eq!((map.width(), map.height()), (map_width, map_height));

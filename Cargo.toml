@@ -1,14 +1,26 @@
 [workspace]
+resolver = "2"
 members = [
-    "crates/game-engine",
+    "crates/engine-core",
+    "crates/engine-wasm",
     "crates/terminal-ui",
 ]
-resolver = "2"
 
 [workspace.package]
 edition = "2024"
+version = "0.1.0"
 rust-version = "1.85"
+publish = false
 license = "MIT"
+
+[workspace.dependencies]
+wasm-bindgen = "0.2"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = 0 }
 
 [profile.release]
 codegen-units = 1

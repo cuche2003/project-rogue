@@ -1,0 +1,8 @@
+[package]
+name = "project-rogue-engine-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

@@ -1,13 +1,15 @@
 # Project Rogue
 
-A terminal-first roguelike built in Rust.
+Terminal-first roguelike built in Rust.
 
 ## Architecture
 
-- `crates/game-engine`: deterministic, UI-independent game state and rules.
+- `crates/engine-core`: deterministic, UI-independent game state and rules.
+- `crates/engine-wasm`: WebAssembly bindings for the engine.
 - `crates/terminal-ui`: Ratatui + Crossterm frontend.
+- `apps/web`: future web frontend.
 
-The engine has no terminal or rendering dependencies, so other frontends—including WebAssembly—can be added without changing game rules.
+Engine has no terminal or rendering dependencies, so frontends can evolve independently.
 
 ## Run
 
@@ -23,7 +25,7 @@ Controls: arrows or `hjkl` move, `q` or `Esc` quits.
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo build -p game-engine --target wasm32-unknown-unknown
+cargo build -p project-rogue-engine-wasm --target wasm32-unknown-unknown
 ```
 
 ## License

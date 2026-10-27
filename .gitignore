@@ -1,5 +1,21 @@
-/target/
-Cargo.lock
+# OS files
 .DS_Store
-.vscode/
+Thumbs.db
+Desktop.ini
+
+# IDE and editor files
 .idea/
+.vscode/
+*.swp
+*.swo
+
+# Build and temporary output
+node_modules/
+target/
+.svelte-kit/
+bin/
+obj/
+build/
+dist/
+tmp/
+temp/

@@ -1,0 +1,12 @@
+[package]
+name = "terminal-ui"
+version = "0.1.0"
+description = "Crossterm and Ratatui frontend for the roguelike"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+crossterm = "0.29.0"
+game-engine = { path = "../game-engine" }
+ratatui = "0.30.2"

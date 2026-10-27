@@ -1,0 +1,10 @@
+[package]
+name = "game-engine"
+version = "0.1.0"
+description = "UI-independent roguelike simulation engine"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"

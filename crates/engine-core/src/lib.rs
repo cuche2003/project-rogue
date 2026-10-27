@@ -245,9 +245,15 @@ impl Engine {
             },
         };
 
-        if !matches!(self.world.resource::<Map>().0.tile(to), Some(Tile::Floor))
-            || self.is_blocked(to, self.player)
-        {
+        if !matches!(self.world.resource::<Map>().0.tile(to), Some(Tile::Floor)) {
+            return CommandResult::Rejected(CommandError::Blocked);
+        }
+
+        if let Some(enemy) = self.enemy_at(to) {
+            return self.attack_enemy(enemy);
+        }
+
+        if self.is_blocked(to, self.player) {
             return CommandResult::Rejected(CommandError::Blocked);
         }
 
@@ -257,6 +263,42 @@ impl Engine {
             from,
             to,
         });
+        self.apply_turn()
+    }
+
+    fn enemy_at(&mut self, position: Position) -> Option<Entity> {
+        self.world
+            .query::<(Entity, &Enemy, &GridPosition)>()
+            .iter(&self.world)
+            .find_map(|(entity, _, entity_position)| {
+                (entity_position.0 == position).then_some(entity)
+            })
+    }
+
+    fn attack_enemy(&mut self, enemy: Entity) -> CommandResult {
+        let target_id = self
+            .world
+            .get::<Identity>(enemy)
+            .expect("enemy entity must have Identity")
+            .0;
+        let (remaining_hp, died) = {
+            let mut health = self
+                .world
+                .get_mut::<Health>(enemy)
+                .expect("enemy entity must have Health");
+            health.current = health.current.saturating_sub(1);
+            (health.current, health.current == 0)
+        };
+        self.events.push_back(GameEvent::DamageTaken {
+            target: target_id,
+            amount: 1,
+            remaining_hp,
+        });
+        if died {
+            self.world.despawn(enemy);
+            self.events
+                .push_back(GameEvent::EntityDied { entity: target_id });
+        }
         self.apply_turn()
     }
 
@@ -326,14 +368,42 @@ mod tests {
             CommandResult::Applied
         );
         assert_eq!(
-            engine.dispatch(Command::Move(Direction::Right)),
+            engine.dispatch(Command::Move(Direction::Down)),
             CommandResult::Applied
         );
         assert_eq!(
-            engine.dispatch(Command::Move(Direction::Down)),
+            engine.dispatch(Command::Move(Direction::Right)),
             CommandResult::Rejected(CommandError::Blocked)
         );
         assert_eq!(engine.turn(), 2);
+    }
+
+    #[test]
+    fn bump_attack_damages_and_despawns_enemy() {
+        let mut engine = Engine::new(GameConfig {
+            map_width: 4,
+            map_height: 3,
+            ..GameConfig::default()
+        });
+        engine.dispatch(Command::Move(Direction::Right));
+        engine.dispatch(Command::Move(Direction::Down));
+        engine.drain_events();
+
+        assert_eq!(
+            engine.dispatch(Command::Move(Direction::Right)),
+            CommandResult::Applied
+        );
+        assert_eq!(engine.snapshot().entities.len(), 2);
+        assert_eq!(engine.drain_events().len(), 1);
+
+        engine.dispatch(Command::Move(Direction::Right));
+        assert_eq!(engine.snapshot().entities.len(), 2);
+        engine.drain_events();
+
+        engine.dispatch(Command::Move(Direction::Right));
+        assert_eq!(engine.snapshot().entities.len(), 1);
+        assert_eq!(engine.turn(), 5);
+        assert_eq!(engine.drain_events().len(), 2);
     }
 
     #[test]

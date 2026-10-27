@@ -221,6 +221,11 @@ impl Engine {
         }
 
         self.world.entity_mut(self.player).insert(GridPosition(to));
+        self.events.push_back(GameEvent::EntityMoved {
+            entity: self.player_id(),
+            from,
+            to,
+        });
         self.apply_turn()
     }
 

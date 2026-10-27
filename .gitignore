@@ -10,6 +10,7 @@ Desktop.ini
 *.swo
 
 # Build and temporary output
+node_modules/
 bin/
 obj/
 build/

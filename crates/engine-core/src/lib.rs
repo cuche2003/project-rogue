@@ -9,7 +9,7 @@ mod map;
 mod resources;
 mod snapshot;
 
-pub use components::{Display, GridPosition, Health, Identity, Player};
+pub use components::{BlocksMovement, Display, Enemy, GridPosition, Health, Identity, Player};
 pub use event::GameEvent;
 pub use map::{GameMap, Position, Tile};
 pub use resources::{GameConfig, Map, NextEntityId, Phase, Turn};
@@ -76,8 +76,29 @@ impl Engine {
                     glyph: '@',
                     name: "Player".to_owned(),
                 },
+                BlocksMovement,
             ))
             .id();
+        let enemy_position = Position {
+            x: config.map_width.saturating_sub(2) as i32,
+            y: config.map_height.saturating_sub(2) as i32,
+        };
+        if enemy_position != Position::default() {
+            world.spawn((
+                Enemy,
+                Identity(EntityId(1)),
+                GridPosition(enemy_position),
+                Health {
+                    current: 3,
+                    maximum: 3,
+                },
+                Display {
+                    glyph: 'r',
+                    name: "Rat".to_owned(),
+                },
+                BlocksMovement,
+            ));
+        }
 
         Self {
             world,
@@ -169,6 +190,19 @@ impl Engine {
             .get::<Health>(self.player)
             .expect("player health");
 
+        let entities = self
+            .world
+            .iter_entities()
+            .filter_map(|entity| {
+                Some(EntitySnapshot {
+                    id: entity.get::<Identity>()?.0,
+                    position: entity.get::<GridPosition>()?.0,
+                    glyph: entity.get::<Display>()?.glyph,
+                    name: entity.get::<Display>()?.name.clone(),
+                })
+            })
+            .collect();
+
         RenderSnapshot {
             phase: self.world.resource::<Phase>().0,
             turn: self.turn(),
@@ -177,12 +211,7 @@ impl Engine {
                 height: map.height(),
                 tiles: map.tiles().to_vec(),
             },
-            entities: vec![EntitySnapshot {
-                id: self.player_id(),
-                position,
-                glyph: '@',
-                name: "Player".to_owned(),
-            }],
+            entities,
             player: PlayerSnapshot {
                 id: self.player_id(),
                 position,
@@ -216,7 +245,9 @@ impl Engine {
             },
         };
 
-        if !matches!(self.world.resource::<Map>().0.tile(to), Some(Tile::Floor)) {
+        if !matches!(self.world.resource::<Map>().0.tile(to), Some(Tile::Floor))
+            || self.is_blocked(to, self.player)
+        {
             return CommandResult::Rejected(CommandError::Blocked);
         }
 
@@ -227,6 +258,15 @@ impl Engine {
             to,
         });
         self.apply_turn()
+    }
+
+    fn is_blocked(&mut self, position: Position, moving_entity: Entity) -> bool {
+        self.world
+            .query::<(Entity, &GridPosition, &BlocksMovement)>()
+            .iter(&self.world)
+            .any(|(entity, entity_position, _)| {
+                entity != moving_entity && entity_position.0 == position
+            })
     }
 
     fn apply_turn(&mut self) -> CommandResult {
@@ -270,6 +310,30 @@ mod tests {
             CommandResult::Rejected(CommandError::Blocked)
         );
         assert_eq!(engine.turn(), 0);
+    }
+
+    #[test]
+    fn enemy_blocks_movement_and_appears_in_snapshot() {
+        let mut engine = Engine::new(GameConfig {
+            map_width: 4,
+            map_height: 3,
+            ..GameConfig::default()
+        });
+
+        assert_eq!(engine.snapshot().entities.len(), 2);
+        assert_eq!(
+            engine.dispatch(Command::Move(Direction::Right)),
+            CommandResult::Applied
+        );
+        assert_eq!(
+            engine.dispatch(Command::Move(Direction::Right)),
+            CommandResult::Applied
+        );
+        assert_eq!(
+            engine.dispatch(Command::Move(Direction::Down)),
+            CommandResult::Rejected(CommandError::Blocked)
+        );
+        assert_eq!(engine.turn(), 2);
     }
 
     #[test]

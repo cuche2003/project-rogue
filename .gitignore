@@ -19,3 +19,6 @@ build/
 dist/
 tmp/
 temp/
+
+# Local tooling state
+.serena/

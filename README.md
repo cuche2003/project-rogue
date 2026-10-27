@@ -4,7 +4,7 @@ Terminal-first roguelike built in Rust.
 
 ## Architecture
 
-- `crates/engine-core`: deterministic, UI-independent game state and rules.
+- `crates/engine-core`: deterministic, UI-independent game state and rules backed by `bevy_ecs`.
 - `crates/engine-wasm`: WebAssembly bindings for the engine.
 - `crates/terminal-ui`: Ratatui + Crossterm frontend.
 - `apps/web`: future web frontend.

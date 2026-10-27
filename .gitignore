@@ -12,6 +12,7 @@ Desktop.ini
 # Build and temporary output
 node_modules/
 target/
+.svelte-kit/
 bin/
 obj/
 build/

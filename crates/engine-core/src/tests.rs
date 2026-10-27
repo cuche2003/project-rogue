@@ -146,6 +146,8 @@ fn defeat_stops_remaining_enemies_and_rejects_future_turns() {
     let mut engine = adjacent_enemy_game();
     engine.world.spawn((
         Enemy,
+        Behavior(BehaviorKind::Chase),
+        AttackDamage(1),
         Identity(EntityId(2)),
         GridPosition(Position { x: 2, y: 3 }),
         Health {
@@ -222,6 +224,8 @@ fn enemy_order_uses_stable_identity_not_spawn_order() {
     for (id, position) in [(3, Position { x: 5, y: 4 }), (2, Position { x: 4, y: 5 })] {
         engine.world.spawn((
             Enemy,
+            Behavior(BehaviorKind::Chase),
+            AttackDamage(1),
             Identity(EntityId(id)),
             GridPosition(position),
             BlocksMovement,

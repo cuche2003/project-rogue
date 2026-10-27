@@ -4,6 +4,7 @@ use bevy_ecs::prelude::{Entity, Schedule, World};
 
 mod command;
 mod components;
+mod content;
 mod event;
 mod generation;
 mod map;
@@ -13,7 +14,10 @@ mod systems;
 mod visibility;
 
 pub use command::{Command, CommandError, CommandResult};
-pub use components::{BlocksMovement, Display, Enemy, GridPosition, Health, Identity, Player};
+pub use components::{
+    AttackDamage, Behavior, BlocksMovement, Display, Enemy, GridPosition, Health, Identity, Player,
+};
+pub use content::{ActorDefinition, BehaviorKind, ContentError, ContentPack};
 pub use event::GameEvent;
 pub use map::{GameMap, Position, Tile};
 use resources::{Events, PlayerEntity, TurnCommand};
@@ -60,24 +64,29 @@ pub struct Engine {
     schedule: Schedule,
     player: Entity,
     config: GameConfig,
+    content: ContentPack,
 }
 
 impl Engine {
     /// Creates a run. Panics for invalid dimensions; use `try_new` for untrusted configuration.
     #[must_use]
     pub fn new(config: GameConfig) -> Self {
-        match Self::try_new(config) {
-            Ok(engine) => engine,
-            Err(error) => panic!("{error}"),
-        }
+        Self::with_content(config, ContentPack::core()).expect("built-in content is valid")
     }
 
-    /// Validates dimensions before allocating or generating a dungeon.
+    /// Validates dimensions and built-in content before allocating or generating a dungeon.
     pub fn try_new(config: GameConfig) -> Result<Self, ConfigError> {
+        Self::with_content(config, ContentPack::core())
+    }
+
+    /// Creates a run with validated host or mod content.
+    pub fn with_content(config: GameConfig, content: ContentPack) -> Result<Self, ConfigError> {
         if !(8..=256).contains(&config.map_width) || !(8..=256).contains(&config.map_height) {
             return Err(ConfigError);
         }
         let (map, start, enemy_position) = generation::generate(config);
+        let player_content = content.actor("core:player").ok_or(ConfigError)?;
+        let rat = content.actor("core:rat").ok_or(ConfigError)?;
         let mut world = World::new();
         world.insert_resource(Turn::default());
         world.insert_resource(Phase(GamePhase::Playing));
@@ -91,30 +100,55 @@ impl Engine {
                 Identity(ids.allocate()),
                 GridPosition(start),
                 Health {
-                    current: 10,
-                    maximum: 10,
+                    current: player_content.max_health,
+                    maximum: player_content.max_health,
                 },
+                AttackDamage(player_content.attack_damage),
                 Display {
-                    glyph: '@',
-                    name: "Player".to_owned(),
+                    glyph: player_content.glyph,
+                    name: player_content.name.clone(),
                 },
                 BlocksMovement,
             ))
             .id();
         world.spawn((
             Enemy,
+            Behavior(rat.behavior),
+            AttackDamage(rat.attack_damage),
             Identity(ids.allocate()),
             GridPosition(enemy_position),
             Health {
-                current: 3,
-                maximum: 3,
+                current: rat.max_health,
+                maximum: rat.max_health,
             },
             Display {
-                glyph: 'r',
-                name: "Rat".to_owned(),
+                glyph: rat.glyph,
+                name: rat.name.clone(),
             },
             BlocksMovement,
         ));
+        if let Some(sentinel) = content.actor("core:sentinel") {
+            let position = Position {
+                x: enemy_position.x,
+                y: (enemy_position.y + 1).min(i32::from(config.map_height) - 2),
+            };
+            world.spawn((
+                Enemy,
+                Behavior(sentinel.behavior),
+                AttackDamage(sentinel.attack_damage),
+                Identity(ids.allocate()),
+                GridPosition(position),
+                Health {
+                    current: sentinel.max_health,
+                    maximum: sentinel.max_health,
+                },
+                Display {
+                    glyph: sentinel.glyph,
+                    name: sentinel.name.clone(),
+                },
+                BlocksMovement,
+            ));
+        }
         world.insert_resource(ids);
         world.insert_resource(PlayerEntity(player));
         systems::update_visibility(&mut world);
@@ -123,6 +157,7 @@ impl Engine {
             schedule: systems::schedule(),
             player,
             config,
+            content,
         })
     }
 
@@ -173,7 +208,8 @@ impl Engine {
     /// Rejected commands spend no turn. Restart reproduces the original seed/configuration.
     pub fn dispatch(&mut self, command: Command) -> CommandResult {
         if command == Command::Restart {
-            *self = Self::new(self.config);
+            *self = Self::with_content(self.config, self.content.clone())
+                .expect("validated configuration");
             return CommandResult::Applied;
         }
         if let Err(error) = systems::validate(&mut self.world, command) {

@@ -3,8 +3,8 @@ use std::collections::VecDeque;
 use bevy_ecs::prelude::*;
 
 use crate::{
-    BlocksMovement, Command, CommandError, Direction, Enemy, GameEvent, GamePhase, GridPosition,
-    Health, Identity, Map, Phase, Position, Tile, Turn,
+    AttackDamage, Behavior, BlocksMovement, Command, CommandError, Direction, Enemy, GameEvent,
+    GamePhase, GridPosition, Health, Identity, Map, Phase, Position, Tile, Turn,
     resources::{Events, PlayerEntity, TurnCommand},
     visibility::Visibility,
 };
@@ -121,11 +121,14 @@ fn move_actor(world: &mut World, entity: Entity, to: Position) {
         });
 }
 
-fn damage(world: &mut World, target: Entity) {
+fn damage(world: &mut World, attacker: Entity, target: Entity) {
     let id = world.get::<Identity>(target).expect("combat identity").0;
+    let amount = world
+        .get::<AttackDamage>(attacker)
+        .map_or(1, |damage| damage.0);
     let remaining_hp = {
         let mut health = world.get_mut::<Health>(target).expect("combat health");
-        health.current = health.current.saturating_sub(1);
+        health.current = health.current.saturating_sub(amount);
         health.current
     };
     world
@@ -133,7 +136,7 @@ fn damage(world: &mut World, target: Entity) {
         .0
         .push(GameEvent::DamageTaken {
             target: id,
-            amount: 1,
+            amount,
             remaining_hp,
         });
 }
@@ -149,7 +152,7 @@ fn player_action(world: &mut World) {
         .0;
     let to = destination(from, direction);
     if let Some(enemy) = occupant(world, to, player) {
-        damage(world, enemy);
+        damage(world, player, enemy);
     } else {
         move_actor(world, player, to);
     }
@@ -216,7 +219,18 @@ fn enemy_actions(world: &mut World) {
         }
         let from = world.get::<GridPosition>(enemy).expect("enemy position").0;
         if from.x.abs_diff(goal.x) + from.y.abs_diff(goal.y) == 1 {
-            damage(world, player);
+            if world
+                .get::<Behavior>(enemy)
+                .is_none_or(|behavior| behavior.0 != crate::BehaviorKind::Passive)
+            {
+                damage(world, enemy, player);
+            }
+            continue;
+        }
+        if world
+            .get::<Behavior>(enemy)
+            .is_some_and(|behavior| behavior.0 != crate::BehaviorKind::Chase)
+        {
             continue;
         }
         // Fixed tie-break order; occupancy checked against previous enemies' moves.

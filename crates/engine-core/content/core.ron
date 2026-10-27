@@ -1,0 +1,26 @@
+[
+    (
+        id: "core:player",
+        name: "Player",
+        glyph: '@',
+        max_health: 10,
+        attack_damage: 1,
+        behavior: Passive,
+    ),
+    (
+        id: "core:rat",
+        name: "Rat",
+        glyph: 'r',
+        max_health: 3,
+        attack_damage: 1,
+        behavior: Chase,
+    ),
+    (
+        id: "core:sentinel",
+        name: "Sentinel",
+        glyph: 'S',
+        max_health: 5,
+        attack_damage: 2,
+        behavior: Guard,
+    ),
+]

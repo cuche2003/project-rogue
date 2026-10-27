@@ -23,7 +23,7 @@ Explore seeded rooms and corridors as player (`@`), survive rats (`r`), and find
 
 Successful descent ends the run immediately without enemy retaliation. Core runs ordered Bevy ECS stages: player action, cleanup of enemies killed by the player, enemy actions, cleanup, outcome, visibility. Enemy pathfinding uses a shared deterministic distance field and stable entity ordering.
 
-Default run uses seed `0`. Restart (`r`) resets the same seed and dungeon, not a fresh random map. Core computes field of view: unexplored tiles stay blank, remembered terrain stays dim, and currently visible terrain is brighter. Only visible entities are supplied to the frontend (player always included); an unseen rat is not necessarily dead.
+Default run uses seed `0`. Restart (`r`) resets the same seed and dungeon, not a fresh random map. Actor content lives in `crates/engine-core/content/core.ron`: stable namespaced IDs, validated stats, and Rust-defined behavior kinds. Hosts can load additional RON text with `ContentPack::from_ron` and start with `Engine::with_content`; no filesystem or Lua runtime enters simulation yet. Core computes field of view: unexplored tiles stay blank, remembered terrain stays dim, and currently visible terrain is brighter. Only visible entities are supplied to the frontend (player always included); an unseen rat is not necessarily dead.
 
 Resize terminal to fit the map, or use the player-following viewport on smaller screens. Minimum 30 x 12 keeps status, recent log, and all controls visible.
 

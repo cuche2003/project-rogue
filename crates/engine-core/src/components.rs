@@ -18,6 +18,14 @@ pub struct Enemy;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 pub struct GridPosition(pub Position);
 
+/// Damage dealt by an actor's basic attack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct AttackDamage(pub u32);
+
+/// AI behavior selected by actor content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct Behavior(pub crate::BehaviorKind);
+
 /// Entity health.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 pub struct Health {

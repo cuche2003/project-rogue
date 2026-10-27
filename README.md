@@ -17,7 +17,9 @@ Engine has no terminal or rendering dependencies, so frontends can evolve indepe
 cargo run -p terminal-ui
 ```
 
-Controls: arrows or `hjkl` move, `q` or `Esc` quits.
+Controls: arrows or `hjkl` move and bump-attack; `.` or Space waits; `r` restarts; `q` or `Esc` quits.
+
+Hunt the rat (`r`) as the player (`@`). Each accepted move, attack, or wait lets the rat move or attack once. Three hits defeat it; losing all HP ends the run. The HUD shows HP and turn count, and the combat log records damage and deaths. Resize the terminal to fit the map, or use the player-following viewport on smaller screens (minimum 30 × 12).
 
 ## Check
 

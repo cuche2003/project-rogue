@@ -1,105 +1,145 @@
 #![forbid(unsafe_code)]
 
-use std::{io, time::Duration};
+use std::{collections::VecDeque, io};
 
-use crossterm::{
-    event::{self, Event, KeyCode},
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use project_rogue_engine_core::{
+    Command, CommandError, CommandResult, Direction, Engine, GameEvent, RenderSnapshot,
 };
-use project_rogue_engine_core::{Command, Direction, Engine, RenderSnapshot};
-use ratatui::{
-    Frame, Terminal,
-    backend::CrosstermBackend,
-    layout::{Constraint, Direction as LayoutDirection, Layout},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
-};
+
+mod view;
+
+const LOG_LIMIT: usize = 100;
 
 fn main() -> io::Result<()> {
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let mut terminal = ratatui::init();
     let result = run(&mut terminal);
-
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    ratatui::restore();
     result
 }
 
-fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
     let mut engine = Engine::default();
+    let mut messages = VecDeque::from(["Hunt the rat. Bump into it to attack.".to_owned()]);
 
     loop {
         let snapshot = engine.snapshot();
-        terminal.draw(|frame| draw(frame, &snapshot))?;
-
-        if !event::poll(Duration::from_millis(100))? {
-            continue;
-        }
+        terminal.draw(|frame| view::draw(frame, &snapshot, &messages))?;
 
         let Event::Key(key) = event::read()? else {
+            // Redraw after resize; no polling or idle simulation ticks.
             continue;
         };
-
-        let command = match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => break,
-            KeyCode::Up | KeyCode::Char('k') => Some(Command::Move(Direction::Up)),
-            KeyCode::Down | KeyCode::Char('j') => Some(Command::Move(Direction::Down)),
-            KeyCode::Left | KeyCode::Char('h') => Some(Command::Move(Direction::Left)),
-            KeyCode::Right | KeyCode::Char('l') => Some(Command::Move(Direction::Right)),
-            _ => None,
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
+            return Ok(());
+        }
+        let Some(command) = command_for(key) else {
+            continue;
         };
-        if let Some(command) = command {
-            engine.dispatch(command);
+        let result = engine.dispatch(command);
+        if command == Command::Restart {
+            messages.clear();
+            messages.push_back("New run. Hunt the rat.".to_owned());
+        }
+        record_events(&mut messages, &snapshot, engine.drain_events());
+        if let CommandResult::Rejected(error) = result {
+            messages.push_back(
+                match error {
+                    CommandError::Blocked => "Blocked. No turn spent.",
+                    CommandError::GameOver => "Run ended. Press r to restart or q to quit.",
+                    CommandError::NoStairs => "No stairs here.",
+                    CommandError::InvalidTarget => "Invalid target.",
+                }
+                .to_owned(),
+            );
+        }
+        while messages.len() > LOG_LIMIT {
+            messages.pop_front();
         }
     }
-
-    Ok(())
 }
 
-fn draw(frame: &mut Frame, snapshot: &RenderSnapshot) {
-    let [header_area, map_area, footer_area] = Layout::default()
-        .direction(LayoutDirection::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(1),
-            Constraint::Length(3),
-        ])
-        .areas(frame.area());
+fn command_for(key: KeyEvent) -> Option<Command> {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => Some(Command::Move(Direction::Up)),
+        KeyCode::Down | KeyCode::Char('j') => Some(Command::Move(Direction::Down)),
+        KeyCode::Left | KeyCode::Char('h') => Some(Command::Move(Direction::Left)),
+        KeyCode::Right | KeyCode::Char('l') => Some(Command::Move(Direction::Right)),
+        KeyCode::Char('.') | KeyCode::Char(' ') => Some(Command::Wait),
+        KeyCode::Char('r') => Some(Command::Restart),
+        _ => None,
+    }
+}
 
-    let header = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "PROJECT ROGUE",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("  |  turn "),
-        Span::styled(
-            snapshot.turn.to_string(),
-            Style::default().fg(Color::Yellow),
-        ),
-    ]))
-    .block(Block::default().borders(Borders::ALL).title(" Status "));
-    frame.render_widget(header, header_area);
+fn record_events(messages: &mut VecDeque<String>, before: &RenderSnapshot, events: Vec<GameEvent>) {
+    for event in events {
+        let message = match event {
+            GameEvent::DamageTaken {
+                target,
+                amount,
+                remaining_hp,
+            } => {
+                let name = before
+                    .entities
+                    .iter()
+                    .find(|entity| entity.id == target)
+                    .map_or("Entity", |entity| entity.name.as_str());
+                format!("{name} takes {amount} damage ({remaining_hp} HP left).")
+            }
+            GameEvent::EntityDied { entity } => {
+                let name = before
+                    .entities
+                    .iter()
+                    .find(|entry| entry.id == entity)
+                    .map_or("Entity", |entry| entry.name.as_str());
+                format!("{name} died.")
+            }
+            GameEvent::Defeat => "Defeat. Press r to restart.".to_owned(),
+            GameEvent::Victory => "Victory! Press r to restart.".to_owned(),
+            GameEvent::Message(text) => text,
+            GameEvent::EntityMoved { .. } | GameEvent::TurnStarted { .. } => continue,
+        };
+        messages.push_back(message);
+    }
+}
 
-    let position = snapshot.player.position;
-    let map_text = format!(
-        "\n\n                         @\n\n                   position ({}, {})",
-        position.x, position.y
-    );
-    let map = Paragraph::new(map_text)
-        .style(Style::default().fg(Color::Green))
-        .block(Block::default().borders(Borders::ALL).title(" Dungeon "));
-    frame.render_widget(map, map_area);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
 
-    let footer = Paragraph::new("Arrows / hjkl move   |   q / Esc quit")
-        .block(Block::default().borders(Borders::ALL).title(" Commands "));
-    frame.render_widget(footer, footer_area);
+    #[test]
+    fn controls_and_combat_log_use_engine_contracts() {
+        assert_eq!(
+            command_for(KeyEvent::new(KeyCode::Char('.'), KeyModifiers::NONE)),
+            Some(Command::Wait)
+        );
+        assert_eq!(
+            command_for(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
+            Some(Command::Restart)
+        );
+        let before = Engine::default().snapshot();
+        let rat = before
+            .entities
+            .iter()
+            .find(|entity| entity.glyph == 'r')
+            .unwrap();
+        let mut messages = VecDeque::new();
+        record_events(
+            &mut messages,
+            &before,
+            vec![
+                GameEvent::DamageTaken {
+                    target: rat.id,
+                    amount: 1,
+                    remaining_hp: 0,
+                },
+                GameEvent::EntityDied { entity: rat.id },
+            ],
+        );
+        assert_eq!(messages, ["Rat takes 1 damage (0 HP left).", "Rat died."]);
+    }
 }

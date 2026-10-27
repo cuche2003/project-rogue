@@ -276,30 +276,40 @@ impl Engine {
     }
 
     fn attack_enemy(&mut self, enemy: Entity) -> CommandResult {
+        self.damage(enemy);
+        self.apply_turn()
+    }
+
+    fn damage(&mut self, target: Entity) {
         let target_id = self
             .world
-            .get::<Identity>(enemy)
-            .expect("enemy entity must have Identity")
+            .get::<Identity>(target)
+            .expect("combat target must have Identity")
             .0;
-        let (remaining_hp, died) = {
+        let remaining_hp = {
             let mut health = self
                 .world
-                .get_mut::<Health>(enemy)
-                .expect("enemy entity must have Health");
+                .get_mut::<Health>(target)
+                .expect("combat target must have Health");
             health.current = health.current.saturating_sub(1);
-            (health.current, health.current == 0)
+            health.current
         };
         self.events.push_back(GameEvent::DamageTaken {
             target: target_id,
             amount: 1,
             remaining_hp,
         });
-        if died {
-            self.world.despawn(enemy);
+        if remaining_hp == 0 {
             self.events
                 .push_back(GameEvent::EntityDied { entity: target_id });
+            if target == self.player {
+                // Retain player data for the final snapshot.
+                self.world.resource_mut::<Phase>().0 = GamePhase::Defeat;
+                self.events.push_back(GameEvent::Defeat);
+            } else {
+                self.world.despawn(target);
+            }
         }
-        self.apply_turn()
     }
 
     fn is_blocked(&mut self, position: Position, moving_entity: Entity) -> bool {
@@ -311,7 +321,59 @@ impl Engine {
             })
     }
 
+    fn enemy_turns(&mut self) {
+        let mut enemies: Vec<_> = self
+            .world
+            .query::<(Entity, &Identity, &Enemy)>()
+            .iter(&self.world)
+            .map(|(entity, identity, _)| (identity.0, entity))
+            .collect();
+        enemies.sort_unstable_by_key(|(id, _)| id.0);
+
+        for (_, enemy) in enemies {
+            if self.world.resource::<Phase>().0 != GamePhase::Playing {
+                break;
+            }
+            let from = self
+                .world
+                .get::<GridPosition>(enemy)
+                .expect("enemy must have GridPosition")
+                .0;
+            let player = self.player_position();
+            if from.x.abs_diff(player.x) + from.y.abs_diff(player.y) == 1 {
+                self.damage(self.player);
+                continue;
+            }
+
+            // ponytail: greedy chase can stall at walls; use pathfinding when dungeon layouts need it.
+            let candidates = [
+                Position {
+                    x: from.x + (player.x - from.x).signum(),
+                    ..from
+                },
+                Position {
+                    y: from.y + (player.y - from.y).signum(),
+                    ..from
+                },
+            ];
+            for to in candidates {
+                if to == from
+                    || !matches!(self.world.resource::<Map>().0.tile(to), Some(Tile::Floor))
+                    || self.is_blocked(to, enemy)
+                {
+                    continue;
+                }
+                self.world.entity_mut(enemy).insert(GridPosition(to));
+                let entity = self.world.get::<Identity>(enemy).expect("enemy identity").0;
+                self.events
+                    .push_back(GameEvent::EntityMoved { entity, from, to });
+                break;
+            }
+        }
+    }
+
     fn apply_turn(&mut self) -> CommandResult {
+        self.enemy_turns();
         self.world.resource_mut::<Turn>().0 += 1;
         CommandResult::Applied
     }
@@ -325,110 +387,219 @@ impl Default for Engine {
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, CommandError, CommandResult, Direction, Engine, GameConfig, Position};
+    use super::*;
 
-    #[test]
-    fn accepted_movement_increments_turn() {
-        let mut engine = Engine::new(GameConfig {
-            map_width: 4,
-            map_height: 4,
-            ..GameConfig::default()
-        });
-
-        assert_eq!(
-            engine.dispatch(Command::Move(Direction::Right)),
-            CommandResult::Applied
-        );
-        assert_eq!(engine.player_position(), Position { x: 1, y: 0 });
-        assert_eq!(engine.turn(), 1);
-    }
-
-    #[test]
-    fn blocked_movement_does_not_increment_turn() {
+    fn adjacent_enemy_game() -> Engine {
         let mut engine = Engine::default();
-
-        assert_eq!(
-            engine.dispatch(Command::Move(Direction::Up)),
-            CommandResult::Rejected(CommandError::Blocked)
-        );
-        assert_eq!(engine.turn(), 0);
+        let enemy = engine
+            .world
+            .query::<(Entity, &Enemy)>()
+            .iter(&engine.world)
+            .next()
+            .unwrap()
+            .0;
+        engine
+            .world
+            .entity_mut(enemy)
+            .insert(GridPosition(Position { x: 1, y: 0 }));
+        engine
     }
 
     #[test]
-    fn enemy_blocks_movement_and_appears_in_snapshot() {
-        let mut engine = Engine::new(GameConfig {
-            map_width: 4,
-            map_height: 3,
-            ..GameConfig::default()
-        });
-
-        assert_eq!(engine.snapshot().entities.len(), 2);
+    fn accepted_movement_increments_turn_and_moves_enemy_once() {
+        let mut engine = Engine::default();
         assert_eq!(
             engine.dispatch(Command::Move(Direction::Right)),
             CommandResult::Applied
         );
-        assert_eq!(
-            engine.dispatch(Command::Move(Direction::Down)),
-            CommandResult::Applied
-        );
-        engine.drain_events();
-        assert_eq!(
-            engine.dispatch(Command::Move(Direction::Right)),
-            CommandResult::Applied
-        );
-        assert_eq!(engine.player_position(), Position { x: 1, y: 1 });
-        assert_eq!(engine.turn(), 3);
-        assert_eq!(
-            engine.drain_events(),
-            vec![super::GameEvent::DamageTaken {
-                target: super::EntityId(1),
-                amount: 1,
-                remaining_hp: 2,
-            }]
-        );
-    }
-
-    #[test]
-    fn bump_attack_damages_and_despawns_enemy() {
-        let mut engine = Engine::new(GameConfig {
-            map_width: 4,
-            map_height: 3,
-            ..GameConfig::default()
-        });
-        engine.dispatch(Command::Move(Direction::Right));
-        engine.dispatch(Command::Move(Direction::Down));
-        engine.drain_events();
-
-        assert_eq!(
-            engine.dispatch(Command::Move(Direction::Right)),
-            CommandResult::Applied
-        );
-        assert_eq!(engine.snapshot().entities.len(), 2);
-        assert_eq!(engine.drain_events().len(), 1);
-
-        engine.dispatch(Command::Move(Direction::Right));
-        assert_eq!(engine.snapshot().entities.len(), 2);
-        engine.drain_events();
-
-        engine.dispatch(Command::Move(Direction::Right));
-        assert_eq!(engine.snapshot().entities.len(), 1);
-        assert_eq!(engine.turn(), 5);
+        assert_eq!(engine.turn(), 1);
+        assert_eq!(engine.player_position(), Position { x: 1, y: 0 });
+        let snapshot = engine.snapshot();
+        let enemy = snapshot
+            .entities
+            .iter()
+            .find(|entity| entity.id == EntityId(1))
+            .unwrap();
+        assert_eq!(enemy.position, Position { x: 37, y: 18 });
         assert_eq!(engine.drain_events().len(), 2);
     }
 
     #[test]
-    fn same_seed_and_commands_produce_same_snapshot() {
-        let mut first = Engine::new(GameConfig::default());
-        let mut second = Engine::new(GameConfig::default());
-        let commands = [
+    fn rejected_commands_and_restart_do_not_run_enemy_turns() {
+        let mut engine = adjacent_enemy_game();
+        let initial = engine.snapshot();
+        for command in [Command::Move(Direction::Up), Command::Descend] {
+            assert!(matches!(
+                engine.dispatch(command),
+                CommandResult::Rejected(_)
+            ));
+            assert_eq!(engine.snapshot(), initial);
+            assert!(engine.drain_events().is_empty());
+        }
+        assert_eq!(engine.dispatch(Command::Restart), CommandResult::Applied);
+        assert_eq!(engine.turn(), 0);
+        assert_eq!(engine.snapshot().player.health.current, 10);
+        assert!(engine.drain_events().is_empty());
+    }
+
+    #[test]
+    fn bump_attack_resolves_before_enemy_response_and_death_frees_tile() {
+        let mut engine = adjacent_enemy_game();
+        for hp in [2, 1] {
+            assert_eq!(
+                engine.dispatch(Command::Move(Direction::Right)),
+                CommandResult::Applied
+            );
+            assert_eq!(engine.player_position(), Position { x: 0, y: 0 });
+            assert_eq!(
+                engine.drain_events(),
+                vec![
+                    GameEvent::DamageTaken {
+                        target: EntityId(1),
+                        amount: 1,
+                        remaining_hp: hp
+                    },
+                    GameEvent::DamageTaken {
+                        target: EntityId(0),
+                        amount: 1,
+                        remaining_hp: 7 + hp
+                    },
+                ]
+            );
+        }
+        engine.dispatch(Command::Move(Direction::Right));
+        assert_eq!(
+            engine.drain_events(),
+            vec![
+                GameEvent::DamageTaken {
+                    target: EntityId(1),
+                    amount: 1,
+                    remaining_hp: 0
+                },
+                GameEvent::EntityDied {
+                    entity: EntityId(1)
+                },
+            ]
+        );
+        assert_eq!(engine.snapshot().entities.len(), 1);
+        assert_eq!(engine.snapshot().player.health.current, 8);
+        assert_eq!(engine.turn(), 3);
+        engine.dispatch(Command::Move(Direction::Right));
+        assert_eq!(engine.player_position(), Position { x: 1, y: 0 });
+    }
+
+    #[test]
+    fn waiting_allows_enemy_attack_and_defeat_rejects_future_turns() {
+        let mut engine = adjacent_enemy_game();
+        for _ in 0..9 {
+            assert_eq!(engine.dispatch(Command::Wait), CommandResult::Applied);
+        }
+        engine.drain_events();
+        assert_eq!(engine.dispatch(Command::Wait), CommandResult::Applied);
+        assert_eq!(
+            engine.drain_events(),
+            vec![
+                GameEvent::DamageTaken {
+                    target: EntityId(0),
+                    amount: 1,
+                    remaining_hp: 0
+                },
+                GameEvent::EntityDied {
+                    entity: EntityId(0)
+                },
+                GameEvent::Defeat,
+            ]
+        );
+        let final_state = engine.snapshot();
+        assert_eq!(final_state.phase, GamePhase::Defeat);
+        assert_eq!(final_state.player.health.current, 0);
+        assert_eq!(final_state.turn, 10);
+        assert_eq!(
+            engine.dispatch(Command::Wait),
+            CommandResult::Rejected(CommandError::GameOver)
+        );
+        assert_eq!(engine.snapshot(), final_state);
+        assert!(engine.drain_events().is_empty());
+    }
+
+    #[test]
+    fn enemy_uses_vertical_fallback_and_respects_walls_and_occupants() {
+        let mut engine = Engine::default();
+        let enemy = engine
+            .world
+            .query::<(Entity, &Enemy)>()
+            .iter(&engine.world)
+            .next()
+            .unwrap()
+            .0;
+        engine
+            .world
+            .entity_mut(enemy)
+            .insert(GridPosition(Position { x: 2, y: 2 }));
+        engine
+            .world
+            .resource_mut::<Map>()
+            .0
+            .set_tile(Position { x: 1, y: 2 }, Tile::Wall);
+        engine.dispatch(Command::Wait);
+        assert_eq!(
+            engine.world.get::<GridPosition>(enemy).unwrap().0,
+            Position { x: 2, y: 1 }
+        );
+        engine
+            .world
+            .resource_mut::<Map>()
+            .0
+            .set_tile(Position { x: 1, y: 1 }, Tile::Wall);
+        engine
+            .world
+            .spawn((BlocksMovement, GridPosition(Position { x: 2, y: 0 })));
+        engine.drain_events();
+        engine.dispatch(Command::Wait);
+        assert_eq!(
+            engine.world.get::<GridPosition>(enemy).unwrap().0,
+            Position { x: 2, y: 1 }
+        );
+        assert!(engine.drain_events().is_empty());
+    }
+
+    #[test]
+    fn enemy_order_uses_stable_identity_not_spawn_order() {
+        let mut engine = Engine::default();
+        for (id, position) in [(3, Position { x: 2, y: 1 }), (2, Position { x: 1, y: 2 })] {
+            engine.world.spawn((
+                Enemy,
+                Identity(EntityId(id)),
+                GridPosition(position),
+                BlocksMovement,
+            ));
+        }
+        engine.dispatch(Command::Wait);
+        let ids: Vec<_> = engine
+            .drain_events()
+            .into_iter()
+            .map(|event| {
+                let GameEvent::EntityMoved { entity, .. } = event else {
+                    panic!("expected movement")
+                };
+                entity
+            })
+            .collect();
+        assert_eq!(ids, vec![EntityId(1), EntityId(2), EntityId(3)]);
+    }
+
+    #[test]
+    fn same_seed_and_commands_produce_same_snapshot_and_events() {
+        let mut first = Engine::default();
+        let mut second = Engine::default();
+        for command in [
             Command::Move(Direction::Right),
             Command::Move(Direction::Down),
             Command::Wait,
-        ];
-
-        for command in commands {
+        ] {
             assert_eq!(first.dispatch(command), second.dispatch(command));
+            assert_eq!(first.snapshot(), second.snapshot());
+            assert_eq!(first.drain_events(), second.drain_events());
         }
-        assert_eq!(first.snapshot(), second.snapshot());
     }
 }

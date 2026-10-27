@@ -5,6 +5,19 @@ use project_rogue_engine_core::{
 #[test]
 fn hidden_enemy_moves_are_not_reported_and_pending_events_are_preserved() {
     let mut engine = Engine::default();
+    let extras: Vec<_> = engine
+        .world()
+        .iter_entities()
+        .filter(|entity| {
+            entity
+                .get::<Identity>()
+                .is_some_and(|identity| identity.0.0 > 1)
+        })
+        .map(|entity| entity.id())
+        .collect();
+    for entity in extras {
+        engine.world_mut().despawn(entity);
+    }
     let rat = engine
         .world()
         .iter_entities()

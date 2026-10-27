@@ -2,6 +2,19 @@ use super::*;
 
 fn fixture() -> Engine {
     let mut engine = Engine::default();
+    let extras: Vec<_> = engine
+        .world
+        .iter_entities()
+        .filter(|entity| {
+            entity
+                .get::<Identity>()
+                .is_some_and(|identity| identity.0 != EntityId(0) && identity.0 != EntityId(1))
+        })
+        .map(|entity| entity.id())
+        .collect();
+    for entity in extras {
+        engine.world.despawn(entity);
+    }
     let mut map = GameMap::new(12, 12, Tile::Floor);
     for x in 0..12 {
         for y in 0..12 {

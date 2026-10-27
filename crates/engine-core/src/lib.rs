@@ -87,6 +87,18 @@ impl Engine {
         let (map, start, enemy_position) = generation::generate(config);
         let player_content = content.actor("core:player").ok_or(ConfigError)?;
         let rat = content.actor("core:rat").ok_or(ConfigError)?;
+        let sentinel_position = content.actor("core:sentinel").and_then(|_| {
+            map.tiles().iter().enumerate().find_map(|(index, tile)| {
+                if *tile != Tile::Floor {
+                    return None;
+                }
+                let position = Position {
+                    x: (index % usize::from(map.width())) as i32,
+                    y: (index / usize::from(map.width())) as i32,
+                };
+                (position != start && position != enemy_position).then_some(position)
+            })
+        });
         let mut world = World::new();
         world.insert_resource(Turn::default());
         world.insert_resource(Phase(GamePhase::Playing));
@@ -127,11 +139,9 @@ impl Engine {
             },
             BlocksMovement,
         ));
-        if let Some(sentinel) = content.actor("core:sentinel") {
-            let position = Position {
-                x: enemy_position.x,
-                y: (enemy_position.y + 1).min(i32::from(config.map_height) - 2),
-            };
+        if let (Some(position), Some(sentinel)) =
+            (sentinel_position, content.actor("core:sentinel"))
+        {
             world.spawn((
                 Enemy,
                 Behavior(sentinel.behavior),

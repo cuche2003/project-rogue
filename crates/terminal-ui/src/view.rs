@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph},
 };
 
 const BACKGROUND: Color = Color::Rgb(16, 20, 29);
@@ -28,42 +28,44 @@ pub fn draw(frame: &mut Frame, snapshot: &RenderSnapshot, messages: &VecDeque<St
         );
         return;
     }
+
     let [status, map_area, log, controls] = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(3),
-        Constraint::Length(5),
         Constraint::Length(2),
+        Constraint::Min(3),
+        Constraint::Length(if area.height >= 18 { 5 } else { 3 }),
+        Constraint::Length(3),
     ])
     .areas(area);
     let hp = snapshot.player.health;
     let phase = match snapshot.phase {
         GamePhase::Defeat => "DEFEAT - r: restart",
         GamePhase::Victory => "VICTORY - r: restart",
-        GamePhase::Playing if snapshot.entities.len() == 1 => "Rat defeated! r: new run",
-        GamePhase::Playing => "Hunt the rat",
+        GamePhase::Playing => "Explore: find > then descend",
     };
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                format!(" HP {}/{} ", hp.current, hp.maximum),
-                Style::default()
-                    .fg(if hp.current <= 3 {
-                        Color::LightRed
-                    } else {
-                        ACCENT
-                    })
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(format!(" Turn {} | {phase}", snapshot.turn)),
-        ]))
-        .block(panel(" PROJECT ROGUE ")),
+        Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled(
+                    format!("HP {}/{}", hp.current, hp.maximum),
+                    Style::default()
+                        .fg(if hp.current <= 3 {
+                            Color::LightRed
+                        } else {
+                            ACCENT
+                        })
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(format!(" | Turn {}", snapshot.turn)),
+            ]),
+            Line::from(phase),
+        ]),
         status,
     );
 
-    let border = panel(" Dungeon | @ player  r rat  # wall ");
+    let border = panel(" Dungeon | @ you > stairs ");
     let inner = border.inner(map_area);
     frame.render_widget(border, map_area);
-    // Follow player when the terminal cannot fit the full map.
+    // Follow player when terminal cannot fit full map.
     let origin_x = (snapshot.player.position.x - i32::from(inner.width) / 2)
         .clamp(0, i32::from(snapshot.map.width.saturating_sub(inner.width)));
     let origin_y = (snapshot.player.position.y - i32::from(inner.height) / 2).clamp(
@@ -74,18 +76,32 @@ pub fn draw(frame: &mut Frame, snapshot: &RenderSnapshot, messages: &VecDeque<St
         for x in 0..inner.width.min(snapshot.map.width) {
             let map_x = (origin_x as usize) + usize::from(x);
             let map_y = (origin_y as usize) + usize::from(y);
-            let tile = snapshot.map.tiles[map_y * usize::from(snapshot.map.width) + map_x];
-            let (glyph, color) = match tile {
-                Tile::Floor => (".", Color::Rgb(52, 66, 84)),
-                Tile::Wall => ("#", MUTED),
-                Tile::StairsDown => (">", Color::Yellow),
+            let index = map_y * usize::from(snapshot.map.width) + map_x;
+            let Some(tile) = snapshot.map.tiles[index] else {
+                continue;
+            };
+            let glyph = match tile {
+                Tile::Floor => ".",
+                Tile::Wall => "#",
+                Tile::StairsDown => ">",
+            };
+            let style = if snapshot.map.visible[index] {
+                Style::default().fg(match tile {
+                    Tile::Floor => MUTED,
+                    Tile::Wall => TEXT,
+                    Tile::StairsDown => Color::Yellow,
+                })
+            } else {
+                Style::default()
+                    .fg(Color::Rgb(65, 76, 92))
+                    .add_modifier(Modifier::DIM)
             };
             frame.buffer_mut()[(inner.x + x, inner.y + y)]
                 .set_symbol(glyph)
-                .set_fg(color)
-                .set_bg(BACKGROUND);
+                .set_style(style);
         }
     }
+    // Core already filters hidden entities; render supplied entities only.
     for entity in &snapshot.entities {
         let x = entity.position.x - origin_x;
         let y = entity.position.y - origin_y;
@@ -95,8 +111,12 @@ pub fn draw(frame: &mut Frame, snapshot: &RenderSnapshot, messages: &VecDeque<St
         let player = entity.id == snapshot.player.id;
         frame.buffer_mut()[(inner.x + x as u16, inner.y + y as u16)]
             .set_symbol(&entity.glyph.to_string())
-            .set_fg(if player { ACCENT } else { Color::LightRed })
-            .set_style(Style::default().add_modifier(Modifier::BOLD));
+            .set_style(
+                Style::default()
+                    .fg(if player { ACCENT } else { Color::LightRed })
+                    .add_modifier(Modifier::BOLD)
+                    .remove_modifier(Modifier::DIM),
+            );
     }
 
     let visible = usize::from(log.height.saturating_sub(2));
@@ -105,13 +125,12 @@ pub fn draw(frame: &mut Frame, snapshot: &RenderSnapshot, messages: &VecDeque<St
         .skip(messages.len().saturating_sub(visible))
         .map(|message| Line::from(message.as_str()))
         .collect();
-    frame.render_widget(Paragraph::new(lines).block(panel(" Combat log ")), log);
+    frame.render_widget(Paragraph::new(lines).block(panel(" Log ")), log);
     frame.render_widget(
         Paragraph::new(
-            "Arrows / hjkl: move & attack | . / Space: wait | r: restart | q / Esc: quit",
+            "Arrows/hjkl: move/attack\n./Space: wait  >: descend\nr: restart  q/Esc: quit",
         )
-        .style(Style::default().fg(MUTED))
-        .wrap(Wrap { trim: true }),
+        .style(Style::default().fg(MUTED)),
         controls,
     );
 }
@@ -126,46 +145,129 @@ fn panel(title: &str) -> Block<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use project_rogue_engine_core::{Command, Engine};
-    use ratatui::{Terminal, backend::TestBackend};
+    use project_rogue_engine_core::{
+        EntityId, EntitySnapshot, HealthSnapshot, MapSnapshot, PlayerSnapshot, Position,
+    };
+    use ratatui::{Terminal, backend::TestBackend, buffer::Buffer};
+
+    fn snapshot() -> RenderSnapshot {
+        let id = EntityId(5);
+        let position = Position { x: 1, y: 1 };
+        RenderSnapshot {
+            phase: GamePhase::Playing,
+            turn: 7,
+            seed: 0,
+            map: MapSnapshot {
+                width: 8,
+                height: 4,
+                tiles: vec![Some(Tile::Floor); 32],
+                visible: vec![true; 32],
+            },
+            player: PlayerSnapshot {
+                id,
+                position,
+                health: HealthSnapshot {
+                    current: 10,
+                    maximum: 10,
+                },
+            },
+            entities: vec![EntitySnapshot {
+                id,
+                position,
+                glyph: '@',
+                name: "Player".to_owned(),
+            }],
+            messages: vec![],
+        }
+    }
+
+    fn render(snapshot: &RenderSnapshot, width: u16, height: u16) -> Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| {
+                draw(
+                    frame,
+                    snapshot,
+                    &VecDeque::from(["Latest message.".to_owned()]),
+                );
+            })
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn text(buffer: &Buffer) -> String {
+        buffer.content().iter().map(|cell| cell.symbol()).collect()
+    }
 
     #[test]
-    fn renders_entities_health_log_and_small_terminal_without_panicking() {
-        let mut engine = Engine::default();
-        let mut snapshot = engine.snapshot();
-        snapshot.map.tiles[1] = Tile::Wall;
-        snapshot.map.tiles[2] = Tile::StairsDown;
-        let messages = VecDeque::from(["Rat takes 1 damage.".to_owned()]);
-        for (width, height) in [(80, 32), (30, 12), (8, 4)] {
-            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            terminal
-                .draw(|frame| draw(frame, &snapshot, &messages))
-                .unwrap();
-            if width == 80 {
-                let buffer = terminal.backend().buffer();
-                assert_eq!(buffer[(1, 4)].symbol(), "@");
-                assert_eq!(buffer[(2, 4)].symbol(), "#");
-                assert_eq!(buffer[(3, 4)].symbol(), ">");
-                assert_eq!(buffer[(39, 22)].symbol(), "r");
-                let text: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
-                assert!(text.contains("HP 10/10"));
-                assert!(text.contains("Rat takes 1 damage."));
-            }
+    fn renders_unknown_blank_and_remembered_terrain_dim() {
+        let mut snapshot = snapshot();
+        snapshot.map.tiles[0] = None;
+        for (x, tile) in [Tile::Floor, Tile::Wall, Tile::StairsDown]
+            .into_iter()
+            .enumerate()
+        {
+            let index = 1 + x * 2;
+            snapshot.map.tiles[index] = Some(tile);
+            snapshot.map.tiles[index + 1] = Some(tile);
+            snapshot.map.visible[index] = false;
         }
-        for _ in 0..80 {
-            engine.dispatch(Command::Wait);
+        let buffer = render(&snapshot, 80, 24);
+        assert_eq!(buffer[(1, 3)].symbol(), " ");
+        for (x, glyph) in [(2, "."), (4, "#"), (6, ">")] {
+            let remembered = &buffer[(x, 3)];
+            let visible = &buffer[(x + 1, 3)];
+            assert_eq!(remembered.symbol(), glyph);
+            assert_eq!(visible.symbol(), glyph);
+            assert!(remembered.modifier.contains(Modifier::DIM));
+            assert!(!visible.modifier.contains(Modifier::DIM));
+            assert_ne!(remembered.fg, visible.fg);
         }
-        let mut terminal = Terminal::new(TestBackend::new(80, 32)).unwrap();
-        terminal
-            .draw(|frame| draw(frame, &engine.snapshot(), &messages))
-            .unwrap();
-        let text: String = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect();
-        assert!(text.contains("DEFEAT"));
+        assert_eq!(buffer[(2, 4)].symbol(), "@");
+    }
+
+    #[test]
+    fn renders_only_supplied_entities_without_inferring_victory() {
+        let mut snapshot = snapshot();
+        let buffer = render(&snapshot, 80, 24);
+        assert_eq!(buffer[(7, 5)].symbol(), ".");
+        assert!(text(&buffer).contains("Explore: find > then descend"));
+        assert!(!text(&buffer).contains("defeated"));
+        snapshot.entities.push(EntitySnapshot {
+            id: EntityId(42),
+            position: Position { x: 6, y: 2 },
+            glyph: 'r',
+            name: "Rat".to_owned(),
+        });
+        assert_eq!(render(&snapshot, 80, 24)[(7, 5)].symbol(), "r");
+    }
+
+    #[test]
+    fn renders_phase_from_snapshot() {
+        let mut snapshot = snapshot();
+        for (phase, label) in [
+            (GamePhase::Victory, "VICTORY - r: restart"),
+            (GamePhase::Defeat, "DEFEAT - r: restart"),
+        ] {
+            snapshot.phase = phase;
+            assert!(text(&render(&snapshot, 30, 12)).contains(label));
+        }
+    }
+
+    #[test]
+    fn compact_terminal_keeps_status_log_and_all_controls_visible() {
+        let snapshot = snapshot();
+        let rendered = text(&render(&snapshot, 30, 12));
+        for label in [
+            "HP 10/10 | Turn 7",
+            "Explore: find > then descend",
+            "Latest message.",
+            "Arrows/hjkl: move/attack",
+            "./Space: wait  >: descend",
+            "r: restart  q/Esc: quit",
+        ] {
+            assert!(rendered.contains(label), "missing: {label}");
+        }
+        assert!(text(&render(&snapshot, 8, 4)).contains("Terminal"));
     }
 }

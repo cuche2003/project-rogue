@@ -4,7 +4,7 @@ use std::{collections::VecDeque, io};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use project_rogue_engine_core::{
-    Command, CommandError, CommandResult, Direction, Engine, GameEvent, RenderSnapshot,
+    Command, CommandError, CommandResult, Direction, Engine, EntitySnapshot, GameEvent,
 };
 
 mod view;
@@ -20,7 +20,8 @@ fn main() -> io::Result<()> {
 
 fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
     let mut engine = Engine::default();
-    let mut messages = VecDeque::from(["Hunt the rat. Bump into it to attack.".to_owned()]);
+    let mut messages =
+        VecDeque::from(["Explore, find >, then press > on stairs to win.".to_owned()]);
 
     loop {
         let snapshot = engine.snapshot();
@@ -42,15 +43,15 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
         let result = engine.dispatch(command);
         if command == Command::Restart {
             messages.clear();
-            messages.push_back("New run. Hunt the rat.".to_owned());
+            messages.push_back("Restarted same seed. Find > and descend.".to_owned());
         }
-        record_events(&mut messages, &snapshot, engine.drain_events());
+        record_events(&mut messages, &snapshot.entities, engine.drain_events());
         if let CommandResult::Rejected(error) = result {
             messages.push_back(
                 match error {
                     CommandError::Blocked => "Blocked. No turn spent.",
                     CommandError::GameOver => "Run ended. Press r to restart or q to quit.",
-                    CommandError::NoStairs => "No stairs here.",
+                    CommandError::NoStairs => "No stairs here. Find > and stand on it.",
                     CommandError::InvalidTarget => "Invalid target.",
                 }
                 .to_owned(),
@@ -69,12 +70,17 @@ fn command_for(key: KeyEvent) -> Option<Command> {
         KeyCode::Left | KeyCode::Char('h') => Some(Command::Move(Direction::Left)),
         KeyCode::Right | KeyCode::Char('l') => Some(Command::Move(Direction::Right)),
         KeyCode::Char('.') | KeyCode::Char(' ') => Some(Command::Wait),
+        KeyCode::Char('>') => Some(Command::Descend),
         KeyCode::Char('r') => Some(Command::Restart),
         _ => None,
     }
 }
 
-fn record_events(messages: &mut VecDeque<String>, before: &RenderSnapshot, events: Vec<GameEvent>) {
+fn record_events(
+    messages: &mut VecDeque<String>,
+    before: &[EntitySnapshot],
+    events: Vec<GameEvent>,
+) {
     for event in events {
         let message = match event {
             GameEvent::DamageTaken {
@@ -83,7 +89,6 @@ fn record_events(messages: &mut VecDeque<String>, before: &RenderSnapshot, event
                 remaining_hp,
             } => {
                 let name = before
-                    .entities
                     .iter()
                     .find(|entity| entity.id == target)
                     .map_or("Entity", |entity| entity.name.as_str());
@@ -91,7 +96,6 @@ fn record_events(messages: &mut VecDeque<String>, before: &RenderSnapshot, event
             }
             GameEvent::EntityDied { entity } => {
                 let name = before
-                    .entities
                     .iter()
                     .find(|entry| entry.id == entity)
                     .map_or("Entity", |entry| entry.name.as_str());
@@ -110,36 +114,78 @@ fn record_events(messages: &mut VecDeque<String>, before: &RenderSnapshot, event
 mod tests {
     use super::*;
     use crossterm::event::KeyModifiers;
+    use project_rogue_engine_core::{EntityId, Position};
 
     #[test]
-    fn controls_and_combat_log_use_engine_contracts() {
+    fn controls_map_to_engine_commands() {
+        for (code, command) in [
+            (KeyCode::Up, Command::Move(Direction::Up)),
+            (KeyCode::Char('k'), Command::Move(Direction::Up)),
+            (KeyCode::Down, Command::Move(Direction::Down)),
+            (KeyCode::Char('j'), Command::Move(Direction::Down)),
+            (KeyCode::Left, Command::Move(Direction::Left)),
+            (KeyCode::Char('h'), Command::Move(Direction::Left)),
+            (KeyCode::Right, Command::Move(Direction::Right)),
+            (KeyCode::Char('l'), Command::Move(Direction::Right)),
+            (KeyCode::Char('.'), Command::Wait),
+            (KeyCode::Char(' '), Command::Wait),
+            (KeyCode::Char('>'), Command::Descend),
+            (KeyCode::Char('r'), Command::Restart),
+        ] {
+            assert_eq!(
+                command_for(KeyEvent::new(code, KeyModifiers::NONE)),
+                Some(command)
+            );
+        }
         assert_eq!(
-            command_for(KeyEvent::new(KeyCode::Char('.'), KeyModifiers::NONE)),
-            Some(Command::Wait)
+            command_for(KeyEvent::new(KeyCode::Char('>'), KeyModifiers::SHIFT)),
+            Some(Command::Descend)
         );
         assert_eq!(
-            command_for(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
-            Some(Command::Restart)
+            command_for(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+            None
         );
-        let before = Engine::default().snapshot();
-        let rat = before
-            .entities
-            .iter()
-            .find(|entity| entity.glyph == 'r')
-            .unwrap();
+    }
+
+    #[test]
+    fn event_log_uses_snapshot_names_and_handles_unseen_entities() {
+        let rat_id = EntityId(42);
+        let before = vec![EntitySnapshot {
+            id: rat_id,
+            position: Position { x: 7, y: 5 },
+            glyph: 'r',
+            name: "Rat".to_owned(),
+        }];
         let mut messages = VecDeque::new();
         record_events(
             &mut messages,
             &before,
             vec![
+                GameEvent::TurnStarted { turn: 1 },
                 GameEvent::DamageTaken {
-                    target: rat.id,
+                    target: rat_id,
                     amount: 1,
                     remaining_hp: 0,
                 },
-                GameEvent::EntityDied { entity: rat.id },
+                GameEvent::EntityDied { entity: rat_id },
+                GameEvent::EntityDied {
+                    entity: EntityId(99),
+                },
+                GameEvent::Message("No stairs here.".to_owned()),
+                GameEvent::Victory,
+                GameEvent::Defeat,
             ],
         );
-        assert_eq!(messages, ["Rat takes 1 damage (0 HP left).", "Rat died."]);
+        assert_eq!(
+            messages,
+            [
+                "Rat takes 1 damage (0 HP left).",
+                "Rat died.",
+                "Entity died.",
+                "No stairs here.",
+                "Victory! Press r to restart.",
+                "Defeat. Press r to restart.",
+            ]
+        );
     }
 }

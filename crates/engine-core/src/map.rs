@@ -13,6 +13,14 @@ pub enum Tile {
     StairsDown,
 }
 
+impl Tile {
+    /// Whether an actor can enter this terrain.
+    #[must_use]
+    pub const fn is_walkable(self) -> bool {
+        matches!(self, Self::Floor | Self::StairsDown)
+    }
+}
+
 /// Bounded map data owned by the simulation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GameMap {

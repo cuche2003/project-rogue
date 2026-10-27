@@ -5,6 +5,7 @@ use crate::{EntityId, GamePhase, Position, Tile};
 pub struct RenderSnapshot {
     pub phase: GamePhase,
     pub turn: u64,
+    pub seed: u64,
     pub map: MapSnapshot,
     pub entities: Vec<EntitySnapshot>,
     pub player: PlayerSnapshot,
@@ -16,7 +17,10 @@ pub struct RenderSnapshot {
 pub struct MapSnapshot {
     pub width: u16,
     pub height: u16,
-    pub tiles: Vec<Tile>,
+    /// Last observed terrain, or None for unexplored cells.
+    pub tiles: Vec<Option<Tile>>,
+    /// Current line-of-sight visibility, in the same row-major order.
+    pub visible: Vec<bool>,
 }
 
 /// Renderable entity data.

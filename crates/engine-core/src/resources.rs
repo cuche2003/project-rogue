@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::Resource;
 
-use crate::{GameMap, GamePhase};
+use crate::{Command, EntityId, GameEvent, GameMap, GamePhase};
 
 /// Current simulation turn.
 #[derive(Debug, Default, Resource)]
@@ -14,8 +14,8 @@ pub struct Phase(pub GamePhase);
 #[derive(Debug, Default, Resource)]
 pub struct NextEntityId(pub u64);
 
-/// Runtime configuration for initial game state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Reproducible run configuration. Dimensions must each be in 8..=256.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
 pub struct GameConfig {
     pub seed: u64,
     pub map_width: u16,
@@ -35,3 +35,20 @@ impl Default for GameConfig {
 /// Map owned by the simulation.
 #[derive(Debug, Resource)]
 pub struct Map(pub GameMap);
+
+#[derive(Resource)]
+pub(crate) struct PlayerEntity(pub bevy_ecs::entity::Entity);
+
+#[derive(Resource)]
+pub(crate) struct TurnCommand(pub Command);
+
+#[derive(Default, Resource)]
+pub(crate) struct Events(pub Vec<GameEvent>);
+
+impl NextEntityId {
+    pub(crate) fn allocate(&mut self) -> EntityId {
+        let id = EntityId(self.0);
+        self.0 = self.0.checked_add(1).expect("entity ID space exhausted");
+        id
+    }
+}

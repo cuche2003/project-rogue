@@ -11,6 +11,7 @@ Desktop.ini
 
 # Build and temporary output
 node_modules/
+target/
 bin/
 obj/
 build/

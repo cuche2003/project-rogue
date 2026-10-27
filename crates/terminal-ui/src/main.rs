@@ -7,7 +7,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use project_rogue_engine_core::{Direction, Engine};
+use project_rogue_engine_core::{Command, Direction, Engine, RenderSnapshot};
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
@@ -33,10 +33,11 @@ fn main() -> io::Result<()> {
 }
 
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
-    let mut engine = Engine::new();
+    let mut engine = Engine::default();
 
     loop {
-        terminal.draw(|frame| draw(frame, &engine))?;
+        let snapshot = engine.snapshot();
+        terminal.draw(|frame| draw(frame, &snapshot))?;
 
         if !event::poll(Duration::from_millis(100))? {
             continue;
@@ -46,20 +47,23 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
             continue;
         };
 
-        match key.code {
+        let command = match key.code {
             KeyCode::Char('q') | KeyCode::Esc => break,
-            KeyCode::Up | KeyCode::Char('k') => engine.step(Direction::Up),
-            KeyCode::Down | KeyCode::Char('j') => engine.step(Direction::Down),
-            KeyCode::Left | KeyCode::Char('h') => engine.step(Direction::Left),
-            KeyCode::Right | KeyCode::Char('l') => engine.step(Direction::Right),
-            _ => {}
+            KeyCode::Up | KeyCode::Char('k') => Some(Command::Move(Direction::Up)),
+            KeyCode::Down | KeyCode::Char('j') => Some(Command::Move(Direction::Down)),
+            KeyCode::Left | KeyCode::Char('h') => Some(Command::Move(Direction::Left)),
+            KeyCode::Right | KeyCode::Char('l') => Some(Command::Move(Direction::Right)),
+            _ => None,
+        };
+        if let Some(command) = command {
+            engine.dispatch(command);
         }
     }
 
     Ok(())
 }
 
-fn draw(frame: &mut Frame, engine: &Engine) {
+fn draw(frame: &mut Frame, snapshot: &RenderSnapshot) {
     let [header_area, map_area, footer_area] = Layout::default()
         .direction(LayoutDirection::Vertical)
         .constraints([
@@ -78,14 +82,14 @@ fn draw(frame: &mut Frame, engine: &Engine) {
         ),
         Span::raw("  |  turn "),
         Span::styled(
-            engine.turn().to_string(),
+            snapshot.turn.to_string(),
             Style::default().fg(Color::Yellow),
         ),
     ]))
     .block(Block::default().borders(Borders::ALL).title(" Status "));
     frame.render_widget(header, header_area);
 
-    let position = engine.player_position();
+    let position = snapshot.player.position;
     let map_text = format!(
         "\n\n                         @\n\n                   position ({}, {})",
         position.x, position.y

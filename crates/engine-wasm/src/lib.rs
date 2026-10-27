@@ -22,7 +22,7 @@ impl Engine {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            inner: CoreEngine::new(),
+            inner: CoreEngine::default(),
         }
     }
 
@@ -34,6 +34,7 @@ impl Engine {
 
     /// Advances the simulation by one turn.
     pub fn advance_turn(&mut self) {
-        self.inner.advance_turn();
+        self.inner
+            .dispatch(project_rogue_engine_core::Command::Wait);
     }
 }

@@ -290,6 +290,16 @@ fn stairs_are_walkable_and_descent_wins_without_enemy_retaliation() {
     assert_eq!(engine.snapshot().phase, GamePhase::Playing);
     assert_eq!(engine.snapshot().floor, 2);
     assert_eq!(engine.snapshot().player.health.current, 1);
+    assert!(
+        engine
+            .snapshot()
+            .map
+            .tiles
+            .iter()
+            .filter(|tile| tile.is_some())
+            .count()
+            < 12 * 12
+    );
     assert_eq!(engine.turn(), 2);
     assert_eq!(engine.dispatch(Command::Wait), CommandResult::Applied);
 }

@@ -477,6 +477,7 @@ impl Engine {
             .collect();
         self.world.insert_resource(GroundItems(ground_items));
         self.world.insert_resource(ids);
+        self.world.insert_resource(Visibility::default());
         self.world.resource_mut::<Turn>().0 += 1;
         systems::update_visibility(&mut self.world);
         self.world

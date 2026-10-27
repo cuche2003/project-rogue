@@ -7,10 +7,10 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use game_engine::{Direction, Game};
+use project_rogue_engine_core::{Direction, Engine};
 use ratatui::{
     Frame, Terminal,
-    backend::{Backend, CrosstermBackend},
+    backend::CrosstermBackend,
     layout::{Constraint, Direction as LayoutDirection, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -32,11 +32,11 @@ fn main() -> io::Result<()> {
     result
 }
 
-fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
-    let mut game = Game::new();
+fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+    let mut engine = Engine::new();
 
     loop {
-        terminal.draw(|frame| draw(frame, &game))?;
+        terminal.draw(|frame| draw(frame, &engine))?;
 
         if !event::poll(Duration::from_millis(100))? {
             continue;
@@ -48,10 +48,10 @@ fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
 
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => break,
-            KeyCode::Up | KeyCode::Char('k') => game.step(Direction::Up),
-            KeyCode::Down | KeyCode::Char('j') => game.step(Direction::Down),
-            KeyCode::Left | KeyCode::Char('h') => game.step(Direction::Left),
-            KeyCode::Right | KeyCode::Char('l') => game.step(Direction::Right),
+            KeyCode::Up | KeyCode::Char('k') => engine.step(Direction::Up),
+            KeyCode::Down | KeyCode::Char('j') => engine.step(Direction::Down),
+            KeyCode::Left | KeyCode::Char('h') => engine.step(Direction::Left),
+            KeyCode::Right | KeyCode::Char('l') => engine.step(Direction::Right),
             _ => {}
         }
     }
@@ -59,7 +59,7 @@ fn run<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     Ok(())
 }
 
-fn draw(frame: &mut Frame, game: &Game) {
+fn draw(frame: &mut Frame, engine: &Engine) {
     let [header_area, map_area, footer_area] = Layout::default()
         .direction(LayoutDirection::Vertical)
         .constraints([
@@ -77,12 +77,15 @@ fn draw(frame: &mut Frame, game: &Game) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  |  turn "),
-        Span::styled(game.turn().to_string(), Style::default().fg(Color::Yellow)),
+        Span::styled(
+            engine.turn().to_string(),
+            Style::default().fg(Color::Yellow),
+        ),
     ]))
     .block(Block::default().borders(Borders::ALL).title(" Status "));
     frame.render_widget(header, header_area);
 
-    let position = game.player_position();
+    let position = engine.player_position();
     let map_text = format!(
         "\n\n                         @\n\n                   position ({}, {})",
         position.x, position.y

@@ -12,5 +12,5 @@ workspace = true
 
 [dependencies]
 crossterm = "0.29.0"
-game-engine = { path = "../game-engine" }
+project-rogue-engine-core = { path = "../engine-core" }
 ratatui = "0.30.2"

@@ -86,18 +86,20 @@ impl Engine {
         }
         let (map, start, enemy_position) = generation::generate(config);
         let player_content = content.actor("core:player").ok_or(ConfigError)?;
-        let rat = content.actor("core:rat").ok_or(ConfigError)?;
-        let sentinel_position = content.actor("core:sentinel").and_then(|_| {
-            map.tiles().iter().enumerate().find_map(|(index, tile)| {
-                if *tile != Tile::Floor {
-                    return None;
-                }
-                let position = Position {
+        let mut spawn_positions = map
+            .tiles()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, tile)| {
+                (*tile == Tile::Floor).then_some(Position {
                     x: (index % usize::from(map.width())) as i32,
                     y: (index / usize::from(map.width())) as i32,
-                };
-                (position != start && position != enemy_position).then_some(position)
+                })
             })
+            .filter(|position| *position != start)
+            .collect::<Vec<_>>();
+        spawn_positions.sort_unstable_by_key(|position| {
+            std::cmp::Reverse(position.x.abs_diff(start.x) + position.y.abs_diff(start.y))
         });
         let mut world = World::new();
         world.insert_resource(Turn::default());
@@ -123,41 +125,34 @@ impl Engine {
                 BlocksMovement,
             ))
             .id();
-        world.spawn((
-            Enemy,
-            Behavior(rat.behavior),
-            AttackDamage(rat.attack_damage),
-            Identity(ids.allocate()),
-            GridPosition(enemy_position),
-            Health {
-                current: rat.max_health,
-                maximum: rat.max_health,
-            },
-            Display {
-                glyph: rat.glyph,
-                name: rat.name.clone(),
-            },
-            BlocksMovement,
-        ));
-        if let (Some(position), Some(sentinel)) =
-            (sentinel_position, content.actor("core:sentinel"))
-        {
-            world.spawn((
-                Enemy,
-                Behavior(sentinel.behavior),
-                AttackDamage(sentinel.attack_damage),
-                Identity(ids.allocate()),
-                GridPosition(position),
-                Health {
-                    current: sentinel.max_health,
-                    maximum: sentinel.max_health,
-                },
-                Display {
-                    glyph: sentinel.glyph,
-                    name: sentinel.name.clone(),
-                },
-                BlocksMovement,
-            ));
+        let mut spawn_index = 0;
+        for spawn in content.spawns() {
+            let actor = content
+                .actor(&spawn.actor_id)
+                .expect("validated spawn actor");
+            for _ in 0..spawn.count {
+                let position = spawn_positions
+                    .get(spawn_index)
+                    .copied()
+                    .unwrap_or(enemy_position);
+                spawn_index += 1;
+                world.spawn((
+                    Enemy,
+                    Behavior(actor.behavior),
+                    AttackDamage(actor.attack_damage),
+                    Identity(ids.allocate()),
+                    GridPosition(position),
+                    Health {
+                        current: actor.max_health,
+                        maximum: actor.max_health,
+                    },
+                    Display {
+                        glyph: actor.glyph,
+                        name: actor.name.clone(),
+                    },
+                    BlocksMovement,
+                ));
+            }
         }
         world.insert_resource(ids);
         world.insert_resource(PlayerEntity(player));

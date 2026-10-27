@@ -1,17 +1,30 @@
 use std::collections::VecDeque;
 
 use project_rogue_engine_core::{
-    Command, CommandResult, Direction, Engine, GameConfig, GamePhase, GridPosition, Identity, Map,
-    Position, Tile,
+    Command, CommandResult, ContentPack, Direction, Engine, GameConfig, GamePhase, GridPosition,
+    Identity, Map, Position, Tile,
 };
 
 #[test]
 fn generated_runs_can_fight_reach_stairs_win_and_restart() {
     for seed in 0..8 {
-        let mut engine = Engine::new(GameConfig {
-            seed,
-            ..GameConfig::default()
-        });
+        let mut engine = Engine::with_content(
+            GameConfig {
+                seed,
+                ..GameConfig::default()
+            },
+            ContentPack::from_ron(
+                r#"(
+                    actors: [
+                        (id: "core:player", name: "Player", glyph: '@', max_health: 10, attack_damage: 1, behavior: Passive),
+                        (id: "core:rat", name: "Rat", glyph: 'r', max_health: 3, attack_damage: 1, behavior: Chase),
+                    ],
+                    spawns: [(actor_id: "core:rat", count: 1)],
+                )"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
         let initial = engine.snapshot();
         let start = engine.player_position();
         // Trusted test inspection, not frontend access: let the rat approach through corridors.
@@ -86,10 +99,16 @@ fn generated_runs_can_fight_reach_stairs_win_and_restart() {
             goal = previous;
         }
         for direction in route.into_iter().rev() {
-            assert_eq!(
-                engine.dispatch(Command::Move(direction)),
-                CommandResult::Applied
-            );
+            for _ in 0..8 {
+                let before = engine.player_position();
+                assert_eq!(
+                    engine.dispatch(Command::Move(direction)),
+                    CommandResult::Applied
+                );
+                if engine.player_position() != before {
+                    break;
+                }
+            }
         }
         assert_eq!(engine.dispatch(Command::Descend), CommandResult::Applied);
         assert_eq!(engine.snapshot().phase, GamePhase::Victory);

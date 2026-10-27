@@ -3,9 +3,9 @@ use std::collections::VecDeque;
 use bevy_ecs::prelude::*;
 
 use crate::{
-    AttackDamage, Behavior, BlocksMovement, Command, CommandError, Direction, Enemy, GameEvent,
-    GamePhase, GridPosition, Health, Identity, Map, Phase, Position, Tile, Turn,
-    resources::{Events, PlayerEntity, TurnCommand},
+    AttackDamage, Behavior, BlocksMovement, Command, CommandError, Direction, Enemy, EntityId,
+    GameEvent, GamePhase, GridPosition, Health, Identity, Map, Phase, Position, Tile, Turn,
+    resources::{Events, Inventory, InventoryEntry, ItemSpawns, PlayerEntity, TurnCommand},
     visibility::Visibility,
 };
 
@@ -95,6 +95,24 @@ pub(crate) fn validate(world: &mut World, command: Command) -> Result<(), Comman
         Command::Descend if world.resource::<Map>().0.tile(from) != Some(Tile::StairsDown) => {
             return Err(CommandError::NoStairs);
         }
+        Command::Pickup
+            if !world
+                .resource::<ItemSpawns>()
+                .0
+                .iter()
+                .any(|(_, position)| *position == from) =>
+        {
+            return Err(CommandError::NoItem);
+        }
+        Command::UseItem(index)
+            if world
+                .resource::<Inventory>()
+                .0
+                .get(index as usize)
+                .is_none() =>
+        {
+            return Err(CommandError::NoItem);
+        }
         _ => {}
     }
     Ok(())
@@ -142,7 +160,68 @@ fn damage(world: &mut World, attacker: Entity, target: Entity) {
 }
 
 fn player_action(world: &mut World) {
-    let Command::Move(direction) = world.resource::<TurnCommand>().0 else {
+    let command = world.resource::<TurnCommand>().0;
+    if command == Command::Pickup {
+        let player = world.resource::<PlayerEntity>().0;
+        let position = world
+            .get::<GridPosition>(player)
+            .expect("player position")
+            .0;
+        let item = world
+            .resource_mut::<ItemSpawns>()
+            .0
+            .iter()
+            .position(|(_, item_position)| *item_position == position);
+        if let Some(index) = item {
+            let item_id = world.resource_mut::<ItemSpawns>().0.remove(index).0;
+            let mut inventory = world.resource_mut::<Inventory>();
+            if let Some(entry) = inventory
+                .0
+                .iter_mut()
+                .find(|entry| entry.item_id == item_id)
+            {
+                entry.quantity += 1;
+            } else {
+                inventory.0.push(InventoryEntry {
+                    item_id: item_id.clone(),
+                    quantity: 1,
+                });
+            }
+            world
+                .resource_mut::<Events>()
+                .0
+                .push(GameEvent::ItemPickedUp {
+                    item: EntityId(index as u64),
+                });
+        }
+        return;
+    }
+    if let Command::UseItem(index) = command {
+        let player = world.resource::<PlayerEntity>().0;
+        let item_id = world
+            .resource::<Inventory>()
+            .0
+            .get(index as usize)
+            .map(|entry| entry.item_id.clone());
+        let Some(item_id) = item_id else {
+            return;
+        };
+        if item_id == "core:potion" {
+            let mut health = world.get_mut::<Health>(player).expect("player health");
+            health.current = health.current.saturating_add(5).min(health.maximum);
+            let mut inventory = world.resource_mut::<Inventory>();
+            let entry = &mut inventory.0[index as usize];
+            entry.quantity -= 1;
+            if entry.quantity == 0 {
+                inventory.0.remove(index as usize);
+            }
+            world.resource_mut::<Events>().0.push(GameEvent::ItemUsed {
+                item: EntityId(index as u64),
+            });
+        }
+        return;
+    }
+    let Command::Move(direction) = command else {
         return;
     };
     let player = world.resource::<PlayerEntity>().0;

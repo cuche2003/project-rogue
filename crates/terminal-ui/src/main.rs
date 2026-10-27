@@ -54,6 +54,8 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
                     CommandError::GameOver => "Run ended. Press r to restart or q to quit.",
                     CommandError::NoStairs => "No stairs here. Find > and stand on it.",
                     CommandError::InvalidTarget => "Invalid target.",
+                    CommandError::NoItem => "No item here or in that inventory slot.",
+                    CommandError::InventoryFull => "Inventory full.",
                 }
                 .to_owned(),
             );
@@ -105,6 +107,8 @@ fn command_for(key: KeyEvent) -> Option<Command> {
         KeyCode::Right | KeyCode::Char('l') => Some(Command::Move(Direction::Right)),
         KeyCode::Char('.') | KeyCode::Char(' ') => Some(Command::Wait),
         KeyCode::Char('>') => Some(Command::Descend),
+        KeyCode::Char('g') => Some(Command::Pickup),
+        KeyCode::Char(c @ '1'..='9') => Some(Command::UseItem(c as u8 - b'1')),
         KeyCode::Char('r') => Some(Command::Restart),
         _ => None,
     }
@@ -137,6 +141,8 @@ fn record_events(
             }
             GameEvent::Defeat => "Defeat. Press r to restart.".to_owned(),
             GameEvent::Victory => "Victory! Press r to restart.".to_owned(),
+            GameEvent::ItemPickedUp { .. } => "Picked up item.".to_owned(),
+            GameEvent::ItemUsed { .. } => "Used item.".to_owned(),
             GameEvent::Message(text) => text,
             GameEvent::EntityMoved { .. } | GameEvent::TurnStarted { .. } => continue,
         };
@@ -150,7 +156,8 @@ mod tests {
 
     #[test]
     fn loads_example_filesystem_mod() {
-        let engine = load_engine_from(Path::new("../../mods")).unwrap();
+        let mods = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mods");
+        let engine = load_engine_from(&mods).unwrap();
         assert!(engine.world().iter_entities().any(|entity| {
             entity
                 .get::<project_rogue_engine_core::Display>()

@@ -9,6 +9,7 @@ pub struct RenderSnapshot {
     pub map: MapSnapshot,
     pub entities: Vec<EntitySnapshot>,
     pub player: PlayerSnapshot,
+    pub inventory: Vec<ItemSnapshot>,
     pub messages: Vec<String>,
 }
 
@@ -30,6 +31,16 @@ pub struct EntitySnapshot {
     pub position: Position,
     pub glyph: char,
     pub name: String,
+}
+
+/// Item visible in player inventory or on the map.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemSnapshot {
+    pub id: EntityId,
+    pub item_id: String,
+    pub name: String,
+    pub glyph: char,
+    pub quantity: u32,
 }
 
 /// Player-specific view data.

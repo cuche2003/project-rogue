@@ -37,6 +37,13 @@ pub struct Health {
 #[derive(Debug, Default, Component)]
 pub struct BlocksMovement;
 
+/// Item identity and stack data.
+#[derive(Debug, Clone, PartialEq, Eq, Component)]
+pub struct Item {
+    pub item_id: String,
+    pub quantity: u32,
+}
+
 /// Presentation hints without terminal or renderer types.
 #[derive(Debug, Clone, PartialEq, Eq, Component)]
 pub struct Display {

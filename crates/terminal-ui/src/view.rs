@@ -33,10 +33,21 @@ pub fn draw(frame: &mut Frame, snapshot: &RenderSnapshot, messages: &VecDeque<St
         Constraint::Length(2),
         Constraint::Min(3),
         Constraint::Length(if area.height >= 18 { 5 } else { 3 }),
-        Constraint::Length(3),
+        Constraint::Length(4),
     ])
     .areas(area);
     let hp = snapshot.player.health;
+    let inventory = if snapshot.inventory.is_empty() {
+        "Inventory: empty".to_owned()
+    } else {
+        snapshot
+            .inventory
+            .iter()
+            .enumerate()
+            .map(|(index, item)| format!("{}:{}{}", index + 1, item.glyph, item.quantity))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
     let phase = match snapshot.phase {
         GamePhase::Defeat => "DEFEAT - r: restart",
         GamePhase::Victory => "VICTORY - r: restart",
@@ -57,7 +68,7 @@ pub fn draw(frame: &mut Frame, snapshot: &RenderSnapshot, messages: &VecDeque<St
                 ),
                 Span::raw(format!(" | Turn {}", snapshot.turn)),
             ]),
-            Line::from(phase),
+            Line::from(format!("{} | {}", phase, inventory)),
         ]),
         status,
     );
@@ -177,6 +188,7 @@ mod tests {
                 glyph: '@',
                 name: "Player".to_owned(),
             }],
+            inventory: vec![],
             messages: vec![],
         }
     }

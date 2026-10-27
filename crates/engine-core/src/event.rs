@@ -19,6 +19,12 @@ pub enum GameEvent {
     EntityDied {
         entity: EntityId,
     },
+    ItemPickedUp {
+        item: EntityId,
+    },
+    ItemUsed {
+        item: EntityId,
+    },
     Message(String),
     Victory,
     Defeat,

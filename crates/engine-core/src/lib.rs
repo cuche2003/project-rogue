@@ -15,14 +15,20 @@ mod visibility;
 
 pub use command::{Command, CommandError, CommandResult};
 pub use components::{
-    AttackDamage, Behavior, BlocksMovement, Display, Enemy, GridPosition, Health, Identity, Player,
+    AttackDamage, Behavior, BlocksMovement, Display, Enemy, GridPosition, Health, Identity, Item,
+    Player,
 };
-pub use content::{ActorDefinition, BehaviorKind, ContentError, ContentPack};
+pub use content::{
+    ActorDefinition, BehaviorKind, ContentError, ContentPack, ItemDefinition, ItemEffect,
+    ItemSpawnDefinition,
+};
 pub use event::GameEvent;
 pub use map::{GameMap, Position, Tile};
-use resources::{Events, PlayerEntity, TurnCommand};
+use resources::{Events, ItemSpawns, PlayerEntity, TurnCommand};
 pub use resources::{GameConfig, Map, NextEntityId, Phase, Turn};
-pub use snapshot::{EntitySnapshot, HealthSnapshot, MapSnapshot, PlayerSnapshot, RenderSnapshot};
+pub use snapshot::{
+    EntitySnapshot, HealthSnapshot, ItemSnapshot, MapSnapshot, PlayerSnapshot, RenderSnapshot,
+};
 pub use systems::TurnSet;
 use visibility::Visibility;
 
@@ -151,6 +157,11 @@ impl Engine {
             .iter()
             .map(|spawn| spawn.count as usize)
             .sum();
+        let item_spawn_positions = spawn_positions
+            .iter()
+            .skip(requested_spawns)
+            .copied()
+            .collect::<Vec<_>>();
         if requested_spawns > spawn_positions.len() {
             return Err(EngineError::InsufficientSpawnTiles {
                 requested: requested_spawns,
@@ -162,6 +173,8 @@ impl Engine {
         world.insert_resource(Phase(GamePhase::Playing));
         world.insert_resource(Map(map));
         world.insert_resource(Events::default());
+        world.insert_resource(ItemSpawns(Vec::new()));
+        world.insert_resource(resources::Inventory::default());
         world.insert_resource(Visibility::default());
         let mut ids = NextEntityId::default();
         let player = world
@@ -207,6 +220,18 @@ impl Engine {
                 ));
             }
         }
+        let mut item_index = 0;
+        let item_spawns = content
+            .item_spawns()
+            .iter()
+            .flat_map(|spawn| (0..spawn.count).map(|_| spawn.item_id.clone()))
+            .filter_map(|item_id| {
+                let position = item_spawn_positions.get(item_index).copied()?;
+                item_index += 1;
+                Some((item_id, position))
+            })
+            .collect();
+        world.insert_resource(ItemSpawns(item_spawns));
         world.insert_resource(ids);
         world.insert_resource(PlayerEntity(player));
         systems::update_visibility(&mut world);
@@ -358,6 +383,22 @@ impl Engine {
                 visible: sight.visible.clone(),
             },
             entities,
+            inventory: self
+                .world
+                .resource::<resources::Inventory>()
+                .0
+                .iter()
+                .filter_map(|entry| {
+                    let item = self.content.item(&entry.item_id)?;
+                    Some(ItemSnapshot {
+                        id: EntityId(0),
+                        item_id: entry.item_id.clone(),
+                        name: item.name.clone(),
+                        glyph: item.glyph,
+                        quantity: entry.quantity,
+                    })
+                })
+                .collect(),
             player: PlayerSnapshot {
                 id: self.player_id(),
                 position: self.player_position(),

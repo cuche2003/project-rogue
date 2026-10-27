@@ -6,6 +6,8 @@ pub enum Command {
     Move(Direction),
     Wait,
     Descend,
+    Pickup,
+    UseItem(u8),
     Restart,
 }
 
@@ -16,6 +18,8 @@ pub enum CommandError {
     Blocked,
     InvalidTarget,
     NoStairs,
+    NoItem,
+    InventoryFull,
 }
 
 /// Result of dispatching one command.

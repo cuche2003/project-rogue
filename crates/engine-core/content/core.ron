@@ -29,4 +29,17 @@
         (actor_id: "core:rat", count: 1),
         (actor_id: "core:sentinel", count: 1),
     ],
+    items: [
+        (
+            id: "core:potion",
+            name: "Potion",
+            glyph: '!',
+            stack_limit: 5,
+            effect: Heal,
+            power: 5,
+        ),
+    ],
+    item_spawns: [
+        (item_id: "core:potion", count: 2),
+    ],
 )

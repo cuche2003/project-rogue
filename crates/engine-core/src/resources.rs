@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::Resource;
 
-use crate::{Command, EntityId, GameEvent, GameMap, GamePhase};
+use crate::{Command, EntityId, GameEvent, GameMap, GamePhase, Position};
 
 /// Current simulation turn.
 #[derive(Debug, Default, Resource)]
@@ -44,6 +44,18 @@ pub(crate) struct TurnCommand(pub Command);
 
 #[derive(Default, Resource)]
 pub(crate) struct Events(pub Vec<GameEvent>);
+
+#[derive(Debug, Resource)]
+pub(crate) struct ItemSpawns(pub Vec<(String, Position)>);
+
+#[derive(Debug, Default, Resource)]
+pub(crate) struct Inventory(pub Vec<InventoryEntry>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InventoryEntry {
+    pub item_id: String,
+    pub quantity: u32,
+}
 
 impl NextEntityId {
     pub(crate) fn allocate(&mut self) -> EntityId {

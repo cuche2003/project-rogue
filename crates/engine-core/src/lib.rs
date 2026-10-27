@@ -371,11 +371,21 @@ mod tests {
             engine.dispatch(Command::Move(Direction::Down)),
             CommandResult::Applied
         );
+        engine.drain_events();
         assert_eq!(
             engine.dispatch(Command::Move(Direction::Right)),
-            CommandResult::Rejected(CommandError::Blocked)
+            CommandResult::Applied
         );
-        assert_eq!(engine.turn(), 2);
+        assert_eq!(engine.player_position(), Position { x: 1, y: 1 });
+        assert_eq!(engine.turn(), 3);
+        assert_eq!(
+            engine.drain_events(),
+            vec![super::GameEvent::DamageTaken {
+                target: super::EntityId(1),
+                amount: 1,
+                remaining_hp: 2,
+            }]
+        );
     }
 
     #[test]

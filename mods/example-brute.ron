@@ -1,0 +1,15 @@
+(
+    actors: [
+        (
+            id: "example:brute",
+            name: "Brute",
+            glyph: 'B',
+            max_health: 8,
+            attack_damage: 3,
+            behavior: Guard,
+        ),
+    ],
+    spawns: [
+        (actor_id: "example:brute", count: 1),
+    ],
+)

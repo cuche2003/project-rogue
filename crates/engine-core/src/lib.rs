@@ -58,6 +58,44 @@ impl std::fmt::Display for ConfigError {
 }
 impl std::error::Error for ConfigError {}
 
+/// Failure while preparing a run from configuration and content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EngineError {
+    Config(ConfigError),
+    Content(ContentError),
+    InsufficientSpawnTiles { requested: usize, available: usize },
+}
+
+impl std::fmt::Display for EngineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Config(error) => error.fmt(f),
+            Self::Content(error) => error.fmt(f),
+            Self::InsufficientSpawnTiles {
+                requested,
+                available,
+            } => write!(
+                f,
+                "content requests {requested} actors but map has only {available} spawn tiles"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for EngineError {}
+
+impl From<ConfigError> for EngineError {
+    fn from(error: ConfigError) -> Self {
+        Self::Config(error)
+    }
+}
+
+impl From<ContentError> for EngineError {
+    fn from(error: ContentError) -> Self {
+        Self::Content(error)
+    }
+}
+
 /// ECS simulation facade. Frontends dispatch commands and consume snapshots/events.
 pub struct Engine {
     world: World,
@@ -76,16 +114,23 @@ impl Engine {
 
     /// Validates dimensions and built-in content before allocating or generating a dungeon.
     pub fn try_new(config: GameConfig) -> Result<Self, ConfigError> {
-        Self::with_content(config, ContentPack::core())
+        Self::with_content(config, ContentPack::core()).map_err(|error| match error {
+            EngineError::Config(error) => error,
+            EngineError::Content(_) | EngineError::InsufficientSpawnTiles { .. } => {
+                unreachable!("built-in content is valid for default dimensions")
+            }
+        })
     }
 
     /// Creates a run with validated host or mod content.
-    pub fn with_content(config: GameConfig, content: ContentPack) -> Result<Self, ConfigError> {
+    pub fn with_content(config: GameConfig, content: ContentPack) -> Result<Self, EngineError> {
         if !(8..=256).contains(&config.map_width) || !(8..=256).contains(&config.map_height) {
-            return Err(ConfigError);
+            return Err(ConfigError.into());
         }
-        let (map, start, enemy_position) = generation::generate(config);
-        let player_content = content.actor("core:player").ok_or(ConfigError)?;
+        let (map, start, _enemy_position) = generation::generate(config);
+        let player_content = content
+            .actor("core:player")
+            .ok_or_else(|| ContentError::InvalidId("core:player".to_owned()))?;
         let mut spawn_positions = map
             .tiles()
             .iter()
@@ -101,6 +146,17 @@ impl Engine {
         spawn_positions.sort_unstable_by_key(|position| {
             std::cmp::Reverse(position.x.abs_diff(start.x) + position.y.abs_diff(start.y))
         });
+        let requested_spawns: usize = content
+            .spawns()
+            .iter()
+            .map(|spawn| spawn.count as usize)
+            .sum();
+        if requested_spawns > spawn_positions.len() {
+            return Err(EngineError::InsufficientSpawnTiles {
+                requested: requested_spawns,
+                available: spawn_positions.len(),
+            });
+        }
         let mut world = World::new();
         world.insert_resource(Turn::default());
         world.insert_resource(Phase(GamePhase::Playing));
@@ -131,10 +187,7 @@ impl Engine {
                 .actor(&spawn.actor_id)
                 .expect("validated spawn actor");
             for _ in 0..spawn.count {
-                let position = spawn_positions
-                    .get(spawn_index)
-                    .copied()
-                    .unwrap_or(enemy_position);
+                let position = spawn_positions[spawn_index];
                 spawn_index += 1;
                 world.spawn((
                     Enemy,

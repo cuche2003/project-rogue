@@ -1,10 +1,11 @@
 #![forbid(unsafe_code)]
 
-use std::{collections::VecDeque, io};
+use std::{collections::VecDeque, fs, io, path::Path};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use project_rogue_engine_core::{
-    Command, CommandError, CommandResult, Direction, Engine, EntitySnapshot, GameEvent,
+    Command, CommandError, CommandResult, ContentPack, Direction, Engine, EntitySnapshot,
+    GameConfig, GameEvent,
 };
 
 mod view;
@@ -19,7 +20,7 @@ fn main() -> io::Result<()> {
 }
 
 fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
-    let mut engine = Engine::default();
+    let mut engine = load_engine()?;
     let mut messages =
         VecDeque::from(["Explore, find >, then press > on stairs to win.".to_owned()]);
 
@@ -61,6 +62,39 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
             messages.pop_front();
         }
     }
+}
+
+fn load_engine() -> io::Result<Engine> {
+    load_engine_from(Path::new("mods"))
+}
+
+fn load_engine_from(mods_dir: &Path) -> io::Result<Engine> {
+    let mut content = ContentPack::core();
+    if mods_dir.is_dir() {
+        let mut paths: Vec<_> = fs::read_dir(mods_dir)?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "ron"))
+            .collect();
+        paths.sort();
+        for path in paths {
+            let source = fs::read_to_string(&path)?;
+            let addon = ContentPack::from_ron(&source).map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{}: {error}", path.display()),
+                )
+            })?;
+            content = content.compose(&addon).map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{}: {error}", path.display()),
+                )
+            })?;
+        }
+    }
+    Engine::with_content(GameConfig::default(), content)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 fn command_for(key: KeyEvent) -> Option<Command> {
@@ -113,6 +147,16 @@ fn record_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loads_example_filesystem_mod() {
+        let engine = load_engine_from(Path::new("../../mods")).unwrap();
+        assert!(engine.world().iter_entities().any(|entity| {
+            entity
+                .get::<project_rogue_engine_core::Display>()
+                .is_some_and(|display| display.name == "Brute" && display.glyph == 'B')
+        }));
+    }
     use crossterm::event::KeyModifiers;
     use project_rogue_engine_core::{EntityId, Position};
 

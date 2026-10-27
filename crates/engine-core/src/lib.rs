@@ -24,7 +24,7 @@ pub use content::{
 };
 pub use event::GameEvent;
 pub use map::{GameMap, Position, Tile};
-use resources::{Events, ItemSpawns, PlayerEntity, TurnCommand};
+use resources::{Content, Events, GroundItems, Inventory, PlayerEntity, TurnCommand};
 pub use resources::{GameConfig, Map, NextEntityId, Phase, Turn};
 pub use snapshot::{
     EntitySnapshot, HealthSnapshot, ItemSnapshot, MapSnapshot, PlayerSnapshot, RenderSnapshot,
@@ -70,6 +70,7 @@ pub enum EngineError {
     Config(ConfigError),
     Content(ContentError),
     InsufficientSpawnTiles { requested: usize, available: usize },
+    InsufficientItemTiles { requested: usize, available: usize },
 }
 
 impl std::fmt::Display for EngineError {
@@ -83,6 +84,13 @@ impl std::fmt::Display for EngineError {
             } => write!(
                 f,
                 "content requests {requested} actors but map has only {available} spawn tiles"
+            ),
+            Self::InsufficientItemTiles {
+                requested,
+                available,
+            } => write!(
+                f,
+                "content requests {requested} items but only {available} spawn tiles remain"
             ),
         }
     }
@@ -122,7 +130,9 @@ impl Engine {
     pub fn try_new(config: GameConfig) -> Result<Self, ConfigError> {
         Self::with_content(config, ContentPack::core()).map_err(|error| match error {
             EngineError::Config(error) => error,
-            EngineError::Content(_) | EngineError::InsufficientSpawnTiles { .. } => {
+            EngineError::Content(_)
+            | EngineError::InsufficientSpawnTiles { .. }
+            | EngineError::InsufficientItemTiles { .. } => {
                 unreachable!("built-in content is valid for default dimensions")
             }
         })
@@ -157,24 +167,38 @@ impl Engine {
             .iter()
             .map(|spawn| spawn.count as usize)
             .sum();
-        let item_spawn_positions = spawn_positions
-            .iter()
-            .skip(requested_spawns)
-            .copied()
-            .collect::<Vec<_>>();
         if requested_spawns > spawn_positions.len() {
             return Err(EngineError::InsufficientSpawnTiles {
                 requested: requested_spawns,
                 available: spawn_positions.len(),
             });
         }
+        // ponytail: floor-only item placement; add explicit item-on-stairs rules when content needs them.
+        let available_item_tiles = spawn_positions.len() - requested_spawns;
+        let requested_items: usize = content
+            .item_spawns()
+            .iter()
+            .map(|spawn| spawn.count as usize)
+            .sum();
+        if requested_items > available_item_tiles {
+            return Err(EngineError::InsufficientItemTiles {
+                requested: requested_items,
+                available: available_item_tiles,
+            });
+        }
+        let item_spawn_positions = spawn_positions
+            .iter()
+            .skip(requested_spawns)
+            .copied()
+            .collect::<Vec<_>>();
         let mut world = World::new();
         world.insert_resource(Turn::default());
         world.insert_resource(Phase(GamePhase::Playing));
         world.insert_resource(Map(map));
         world.insert_resource(Events::default());
-        world.insert_resource(ItemSpawns(Vec::new()));
-        world.insert_resource(resources::Inventory::default());
+        world.insert_resource(GroundItems::default());
+        world.insert_resource(Inventory::default());
+        world.insert_resource(Content(content.clone()));
         world.insert_resource(Visibility::default());
         let mut ids = NextEntityId::default();
         let player = world
@@ -225,13 +249,18 @@ impl Engine {
             .item_spawns()
             .iter()
             .flat_map(|spawn| (0..spawn.count).map(|_| spawn.item_id.clone()))
-            .filter_map(|item_id| {
-                let position = item_spawn_positions.get(item_index).copied()?;
+            .map(|item_id| {
+                let position = item_spawn_positions[item_index];
                 item_index += 1;
-                Some((item_id, position))
+                resources::GroundItem {
+                    id: ids.allocate(),
+                    item_id,
+                    position,
+                    quantity: 1,
+                }
             })
             .collect();
-        world.insert_resource(ItemSpawns(item_spawns));
+        world.insert_resource(GroundItems(item_spawns));
         world.insert_resource(ids);
         world.insert_resource(PlayerEntity(player));
         systems::update_visibility(&mut world);
@@ -372,6 +401,24 @@ impl Engine {
             .world
             .get::<Health>(self.player)
             .expect("player health");
+        let items = self
+            .world
+            .resource::<GroundItems>()
+            .0
+            .iter()
+            .filter(|item| sight.sees(map, item.position))
+            .filter_map(|item| {
+                let definition = self.content.item(&item.item_id)?;
+                Some(ItemSnapshot {
+                    id: item.id,
+                    item_id: item.item_id.clone(),
+                    name: definition.name.clone(),
+                    glyph: definition.glyph,
+                    quantity: item.quantity,
+                    position: Some(item.position),
+                })
+            })
+            .collect();
         RenderSnapshot {
             phase: self.world.resource::<Phase>().0,
             turn: self.turn(),
@@ -383,19 +430,21 @@ impl Engine {
                 visible: sight.visible.clone(),
             },
             entities,
+            items,
             inventory: self
                 .world
-                .resource::<resources::Inventory>()
+                .resource::<Inventory>()
                 .0
                 .iter()
                 .filter_map(|entry| {
                     let item = self.content.item(&entry.item_id)?;
                     Some(ItemSnapshot {
-                        id: EntityId(0),
+                        id: entry.id,
                         item_id: entry.item_id.clone(),
                         name: item.name.clone(),
                         glyph: item.glyph,
                         quantity: entry.quantity,
+                        position: None,
                     })
                 })
                 .collect(),

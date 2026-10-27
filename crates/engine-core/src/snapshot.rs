@@ -8,6 +8,7 @@ pub struct RenderSnapshot {
     pub seed: u64,
     pub map: MapSnapshot,
     pub entities: Vec<EntitySnapshot>,
+    pub items: Vec<ItemSnapshot>,
     pub player: PlayerSnapshot,
     pub inventory: Vec<ItemSnapshot>,
     pub messages: Vec<String>,
@@ -41,6 +42,7 @@ pub struct ItemSnapshot {
     pub name: String,
     pub glyph: char,
     pub quantity: u32,
+    pub position: Option<Position>,
 }
 
 /// Player-specific view data.

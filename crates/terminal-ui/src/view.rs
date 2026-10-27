@@ -112,6 +112,23 @@ pub fn draw(frame: &mut Frame, snapshot: &RenderSnapshot, messages: &VecDeque<St
                 .set_style(style);
         }
     }
+    for item in &snapshot.items {
+        let Some(position) = item.position else {
+            continue;
+        };
+        let x = position.x - origin_x;
+        let y = position.y - origin_y;
+        if x < 0 || y < 0 || x >= i32::from(inner.width) || y >= i32::from(inner.height) {
+            continue;
+        }
+        frame.buffer_mut()[(inner.x + x as u16, inner.y + y as u16)]
+            .set_symbol(&item.glyph.to_string())
+            .set_style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            );
+    }
     // Core already filters hidden entities; render supplied entities only.
     for entity in &snapshot.entities {
         let x = entity.position.x - origin_x;
@@ -188,6 +205,7 @@ mod tests {
                 glyph: '@',
                 name: "Player".to_owned(),
             }],
+            items: vec![],
             inventory: vec![],
             messages: vec![],
         }

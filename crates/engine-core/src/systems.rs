@@ -2,10 +2,13 @@ use std::collections::VecDeque;
 
 use bevy_ecs::prelude::*;
 
+use crate::resources::INVENTORY_SLOTS;
 use crate::{
-    AttackDamage, Behavior, BlocksMovement, Command, CommandError, Direction, Enemy, EntityId,
-    GameEvent, GamePhase, GridPosition, Health, Identity, Map, Phase, Position, Tile, Turn,
-    resources::{Events, Inventory, InventoryEntry, ItemSpawns, PlayerEntity, TurnCommand},
+    AttackDamage, Behavior, BlocksMovement, Command, CommandError, Direction, Enemy, GameEvent,
+    GamePhase, GridPosition, Health, Identity, Map, Phase, Position, Tile, Turn,
+    resources::{
+        Content, Events, GroundItems, Inventory, InventoryEntry, PlayerEntity, TurnCommand,
+    },
     visibility::Visibility,
 };
 
@@ -97,12 +100,15 @@ pub(crate) fn validate(world: &mut World, command: Command) -> Result<(), Comman
         }
         Command::Pickup
             if !world
-                .resource::<ItemSpawns>()
+                .resource::<GroundItems>()
                 .0
                 .iter()
-                .any(|(_, position)| *position == from) =>
+                .any(|item| item.position == from) =>
         {
             return Err(CommandError::NoItem);
+        }
+        Command::Pickup if !pickup_fits(world, from) => {
+            return Err(CommandError::InventoryFull);
         }
         Command::UseItem(index)
             if world
@@ -116,6 +122,27 @@ pub(crate) fn validate(world: &mut World, command: Command) -> Result<(), Comman
         _ => {}
     }
     Ok(())
+}
+
+fn pickup_fits(world: &World, position: Position) -> bool {
+    let ground = world
+        .resource::<GroundItems>()
+        .0
+        .iter()
+        .find(|item| item.position == position)
+        .expect("validated item");
+    let stack_limit = world
+        .resource::<Content>()
+        .0
+        .item(&ground.item_id)
+        .expect("validated item")
+        .stack_limit;
+    world.resource::<Inventory>().0.len() < INVENTORY_SLOTS
+        || world
+            .resource::<Inventory>()
+            .0
+            .iter()
+            .any(|entry| entry.item_id == ground.item_id && entry.quantity < stack_limit)
 }
 
 fn occupant(world: &mut World, position: Position, actor: Entity) -> Option<Entity> {
@@ -161,75 +188,87 @@ fn damage(world: &mut World, attacker: Entity, target: Entity) {
 
 fn player_action(world: &mut World) {
     let command = world.resource::<TurnCommand>().0;
+    let player = world.resource::<PlayerEntity>().0;
+    let position = world
+        .get::<GridPosition>(player)
+        .expect("player position")
+        .0;
     if command == Command::Pickup {
-        let player = world.resource::<PlayerEntity>().0;
-        let position = world
-            .get::<GridPosition>(player)
-            .expect("player position")
-            .0;
-        let item = world
-            .resource_mut::<ItemSpawns>()
+        let index = world
+            .resource::<GroundItems>()
             .0
             .iter()
-            .position(|(_, item_position)| *item_position == position);
-        if let Some(index) = item {
-            let item_id = world.resource_mut::<ItemSpawns>().0.remove(index).0;
-            let mut inventory = world.resource_mut::<Inventory>();
-            if let Some(entry) = inventory
-                .0
-                .iter_mut()
-                .find(|entry| entry.item_id == item_id)
-            {
-                entry.quantity += 1;
-            } else {
-                inventory.0.push(InventoryEntry {
-                    item_id: item_id.clone(),
-                    quantity: 1,
-                });
-            }
-            world
-                .resource_mut::<Events>()
-                .0
-                .push(GameEvent::ItemPickedUp {
-                    item: EntityId(index as u64),
-                });
+            .position(|item| item.position == position)
+            .expect("validated item");
+        let ground = world.resource_mut::<GroundItems>().0.remove(index);
+        let stack_limit = world
+            .resource::<Content>()
+            .0
+            .item(&ground.item_id)
+            .expect("validated item")
+            .stack_limit;
+        let mut inventory = world.resource_mut::<Inventory>();
+        if let Some(entry) = inventory
+            .0
+            .iter_mut()
+            .find(|entry| entry.item_id == ground.item_id && entry.quantity < stack_limit)
+        {
+            entry.quantity = entry
+                .quantity
+                .saturating_add(ground.quantity)
+                .min(stack_limit);
+        } else {
+            debug_assert!(inventory.0.len() < INVENTORY_SLOTS);
+            inventory.0.push(InventoryEntry {
+                id: ground.id,
+                item_id: ground.item_id.clone(),
+                quantity: ground.quantity.min(stack_limit),
+            });
         }
+        world
+            .resource_mut::<Events>()
+            .0
+            .push(GameEvent::ItemPickedUp { item: ground.id });
         return;
     }
     if let Command::UseItem(index) = command {
-        let player = world.resource::<PlayerEntity>().0;
-        let item_id = world
-            .resource::<Inventory>()
+        let item_id = world.resource::<Inventory>().0[index as usize]
+            .item_id
+            .clone();
+        let item = world
+            .resource::<Content>()
             .0
-            .get(index as usize)
-            .map(|entry| entry.item_id.clone());
-        let Some(item_id) = item_id else {
-            return;
-        };
-        if item_id == "core:potion" {
-            let mut health = world.get_mut::<Health>(player).expect("player health");
-            health.current = health.current.saturating_add(5).min(health.maximum);
+            .item(&item_id)
+            .expect("validated item")
+            .clone();
+        match item.effect {
+            crate::ItemEffect::Heal => {
+                let mut health = world.get_mut::<Health>(player).expect("player health");
+                health.current = health
+                    .current
+                    .saturating_add(item.power)
+                    .min(health.maximum);
+            }
+        }
+        let item_id = {
             let mut inventory = world.resource_mut::<Inventory>();
-            let entry = &mut inventory.0[index as usize];
-            entry.quantity -= 1;
-            if entry.quantity == 0 {
+            let id = inventory.0[index as usize].id;
+            inventory.0[index as usize].quantity -= 1;
+            if inventory.0[index as usize].quantity == 0 {
                 inventory.0.remove(index as usize);
             }
-            world.resource_mut::<Events>().0.push(GameEvent::ItemUsed {
-                item: EntityId(index as u64),
-            });
-        }
+            id
+        };
+        world
+            .resource_mut::<Events>()
+            .0
+            .push(GameEvent::ItemUsed { item: item_id });
         return;
     }
     let Command::Move(direction) = command else {
         return;
     };
-    let player = world.resource::<PlayerEntity>().0;
-    let from = world
-        .get::<GridPosition>(player)
-        .expect("player position")
-        .0;
-    let to = destination(from, direction);
+    let to = destination(position, direction);
     if let Some(enemy) = occupant(world, to, player) {
         damage(world, player, enemy);
     } else {

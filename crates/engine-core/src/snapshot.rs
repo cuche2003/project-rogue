@@ -1,7 +1,7 @@
 use crate::{EntityId, GamePhase, Position, Tile};
 
 /// Complete UI-neutral view of current game state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct RenderSnapshot {
     pub phase: GamePhase,
     pub turn: u64,
@@ -17,7 +17,7 @@ pub struct RenderSnapshot {
 }
 
 /// Renderable map data.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct MapSnapshot {
     pub width: u16,
     pub height: u16,
@@ -28,7 +28,7 @@ pub struct MapSnapshot {
 }
 
 /// Renderable entity data.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct EntitySnapshot {
     pub id: EntityId,
     pub position: Position,
@@ -37,7 +37,7 @@ pub struct EntitySnapshot {
 }
 
 /// Item visible in player inventory or on the map.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ItemSnapshot {
     pub id: EntityId,
     pub item_id: String,
@@ -48,7 +48,7 @@ pub struct ItemSnapshot {
 }
 
 /// Player-specific view data.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PlayerSnapshot {
     pub id: EntityId,
     pub position: Position,
@@ -56,7 +56,7 @@ pub struct PlayerSnapshot {
 }
 
 /// Health value exposed to a frontend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct HealthSnapshot {
     pub current: u32,
     pub maximum: u32,

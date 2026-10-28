@@ -17,7 +17,15 @@ Engine has no terminal or rendering dependencies, so frontends can evolve indepe
 cargo run -p terminal-ui
 cargo run -p terminal-ui -- --record run.ron
 cargo run -p terminal-ui -- --replay run.ron
+cargo run -p terminal-ui -- --verify run.ron
+cargo run -p terminal-ui -- --agent
 ```
+
+Replays start paused. Space or Enter dispatches exactly one recorded command; gameplay keys are ignored. `p` toggles timed autoplay; `p` pauses and `q`/`Esc` quits during playback. The controls show `[complete]` after the last command, including empty replays.
+
+`--verify PATH` runs headlessly before terminal initialization. It runs the replay twice and compares each command's result, snapshot, and events using `Replay::verify`. Success prints a confirmation and exits zero; malformed files, invalid content/configuration, unsupported versions, or divergence exit nonzero. Missing paths, extra arguments, and unknown options are rejected. Verification checks repeatability under the current engine, **not agreement with original recorded truth**: replay files contain starting configuration/content and commands, not recorded results, snapshots, or events.
+
+`--agent` reads one command per stdin line and writes one JSON response per command. Supported commands: `move up|down|left|right`, `wait`, `pickup`, `use 0`-`use 8`, `descend`, `restart`, and `quit`. Game responses include `result`, drained `events`, and full player-visible `snapshot`; malformed commands return `error`. Blank lines are ignored.
 
 Controls: arrows or `hjkl` move and bump-attack; `.` or Space waits; `g` picks up items; `1`-`9` uses inventory items; `>` descends; `r` restarts; `q` or `Esc` quits.
 

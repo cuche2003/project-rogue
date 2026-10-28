@@ -166,7 +166,13 @@ pub fn draw(
         Paragraph::new(match replay {
             Some((index, total, playing)) => format!(
                 "Replay {index}/{total} {}\nSpace/Enter: step p: play/pause\nq/Esc: quit",
-                if playing { "[playing]" } else { "[paused]" }
+                if index == total {
+                    "[complete]"
+                } else if playing {
+                    "[playing]"
+                } else {
+                    "[paused]"
+                }
             ),
             None => "Arrows/hjkl: move/attack\n./Space: wait  >: descend\nr: restart  q/Esc: quit"
                 .to_owned(),
@@ -286,6 +292,29 @@ mod tests {
             name: "Rat".to_owned(),
         });
         assert_eq!(render(&snapshot, 80, 24)[(7, 5)].symbol(), "r");
+    }
+
+    #[test]
+    fn replay_controls_show_paused_playing_and_complete_including_empty() {
+        for (index, total, playing, label) in [
+            (0, 2, false, "[paused]"),
+            (1, 2, true, "[playing]"),
+            (2, 2, false, "[complete]"),
+            (0, 0, false, "[complete]"),
+        ] {
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal
+                .draw(|frame| {
+                    draw(
+                        frame,
+                        &snapshot(),
+                        &VecDeque::new(),
+                        Some((index, total, playing)),
+                    )
+                })
+                .unwrap();
+            assert!(text(terminal.backend().buffer()).contains(label));
+        }
     }
 
     #[test]

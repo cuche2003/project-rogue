@@ -14,7 +14,7 @@ pub enum Command {
 }
 
 /// Why a command was not accepted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum CommandError {
     GameOver,
     Blocked,
@@ -25,7 +25,7 @@ pub enum CommandError {
 }
 
 /// Result of dispatching one command.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum CommandResult {
     Applied,
     Rejected(CommandError),

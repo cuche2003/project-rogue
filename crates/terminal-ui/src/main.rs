@@ -2,7 +2,8 @@
 
 use std::{
     collections::VecDeque,
-    env, fs, io,
+    env, fs,
+    io::{self, BufRead, BufReader, Write},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -18,20 +19,38 @@ mod view;
 const LOG_LIMIT: usize = 100;
 
 fn main() -> io::Result<()> {
+    let mode = run_mode(env::args_os().skip(1))?;
+    if let RunMode::Verify(path) = &mode {
+        let replay = load_replay(path)?;
+        replay.verify().map_err(invalid_data)?;
+        println!(
+            "Verification succeeded: {} commands reproduced identical results, snapshots, and events.",
+            replay.commands().len()
+        );
+        return Ok(());
+    }
+    if matches!(mode, RunMode::Agent) {
+        return run_agent();
+    }
     let mut terminal = ratatui::init();
-    let result = run(&mut terminal);
+    let result = run(&mut terminal, mode);
     ratatui::restore();
     result
 }
 
-fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
-    let mode = run_mode()?;
-    let mut replay_commands = None;
+fn run(terminal: &mut ratatui::DefaultTerminal, mode: RunMode) -> io::Result<()> {
+    let mut playback = None;
     let mut engine = match &mode {
         RunMode::Replay(path) => {
             let replay = load_replay(path)?;
-            replay_commands = Some(replay.commands().to_vec());
+            playback = Some(ReplayPlayback {
+                commands: replay.commands().to_vec(),
+                ..ReplayPlayback::default()
+            });
             replay.start().map_err(invalid_data)?
+        }
+        RunMode::Verify(_) | RunMode::Agent => {
+            return Err(invalid_data("mode must run headlessly"));
         }
         RunMode::Normal | RunMode::Record(_) => {
             let mut engine = load_engine()?;
@@ -41,14 +60,11 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
             engine
         }
     };
-    let mut replay_index = 0;
-    let mut messages = VecDeque::from([match &mode {
-        RunMode::Replay(_) => "Replay: press Space to step, p to play/pause, q to quit.".to_owned(),
-        RunMode::Normal | RunMode::Record(_) => {
-            "Explore, find >, then press > on stairs to win.".to_owned()
-        }
+    let mut messages = VecDeque::from([if playback.is_some() {
+        "Replay: Space/Enter to step, p to play/pause, q to quit.".to_owned()
+    } else {
+        "Explore, find >, then press > on stairs to win.".to_owned()
     }]);
-    let mut replay_playing = false;
 
     loop {
         let snapshot = engine.snapshot();
@@ -57,28 +73,24 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
                 frame,
                 &snapshot,
                 &messages,
-                replay_commands
+                playback
                     .as_ref()
-                    .map(|commands| (replay_index, commands.len(), replay_playing)),
+                    .map(|replay| (replay.index, replay.commands.len(), replay.playing)),
             )
         })?;
 
-        if matches!(mode, RunMode::Replay(_)) && replay_playing {
-            if replay_index < replay_commands.as_ref().expect("replay commands").len() {
-                dispatch_command(
-                    &mut engine,
-                    replay_commands.as_ref().expect("replay commands")[replay_index],
-                    &mut messages,
-                );
-                replay_index += 1;
-                std::thread::sleep(Duration::from_millis(80));
-                continue;
+        let input = read_input(
+            playback.as_ref().is_some_and(|replay| replay.playing),
+            event::poll,
+            event::read,
+        )?;
+        if let Some(replay) = &mut playback {
+            if replay.handle_input(input, &mut engine, &mut messages) {
+                return Ok(());
             }
-            replay_playing = false;
+            continue;
         }
-
-        let Event::Key(key) = event::read()? else {
-            // Redraw after resize; no polling or idle simulation ticks.
+        let Some(Event::Key(key)) = input else {
             continue;
         };
         if key.kind != KeyEventKind::Press {
@@ -90,27 +102,64 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
             }
             return Ok(());
         }
-        if let RunMode::Replay(_) = mode {
-            match key.code {
-                KeyCode::Char(' ') | KeyCode::Enter
-                    if replay_index < replay_commands.as_ref().expect("replay commands").len() =>
-                {
-                    dispatch_command(
-                        &mut engine,
-                        replay_commands.as_ref().expect("replay commands")[replay_index],
-                        &mut messages,
-                    );
-                    replay_index += 1;
-                }
-                KeyCode::Char('p') => replay_playing = !replay_playing,
-                _ => {}
-            }
-            continue;
+        if let Some(command) = command_for(key) {
+            dispatch_command(&mut engine, command, &mut messages);
         }
-        let Some(command) = command_for(key) else {
-            continue;
-        };
-        dispatch_command(&mut engine, command, &mut messages);
+    }
+}
+
+fn read_input(
+    playing: bool,
+    mut poll: impl FnMut(Duration) -> io::Result<bool>,
+    mut read: impl FnMut() -> io::Result<Event>,
+) -> io::Result<Option<Event>> {
+    if playing && !poll(Duration::from_millis(80))? {
+        return Ok(None);
+    }
+    read().map(Some)
+}
+
+#[derive(Default)]
+struct ReplayPlayback {
+    commands: Vec<Command>,
+    index: usize,
+    playing: bool,
+}
+
+impl ReplayPlayback {
+    // None means the autoplay poll timed out; input always takes priority over stepping.
+    fn handle_input(
+        &mut self,
+        input: Option<Event>,
+        engine: &mut Engine,
+        messages: &mut VecDeque<String>,
+    ) -> bool {
+        match input {
+            Some(Event::Key(key)) if key.kind == KeyEventKind::Press => match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => return true,
+                KeyCode::Char('p') => {
+                    self.playing = !self.playing && self.index < self.commands.len();
+                }
+                KeyCode::Char(' ') | KeyCode::Enter => {
+                    self.playing = false;
+                    self.step(engine, messages);
+                }
+                _ => {}
+            },
+            None if self.playing => self.step(engine, messages),
+            _ => {}
+        }
+        false
+    }
+
+    fn step(&mut self, engine: &mut Engine, messages: &mut VecDeque<String>) {
+        if let Some(&command) = self.commands.get(self.index) {
+            dispatch_command(engine, command, messages);
+            self.index += 1;
+        }
+        if self.index == self.commands.len() {
+            self.playing = false;
+        }
     }
 }
 
@@ -142,26 +191,129 @@ fn dispatch_command(engine: &mut Engine, command: Command, messages: &mut VecDeq
 
 enum RunMode {
     Normal,
+    Agent,
     Record(PathBuf),
     Replay(PathBuf),
+    Verify(PathBuf),
 }
 
-fn run_mode() -> io::Result<RunMode> {
-    let mut args = env::args_os().skip(1);
-    match args.next().as_deref() {
-        None => Ok(RunMode::Normal),
-        Some(value) if value == "--record" => args
-            .next()
-            .map(PathBuf::from)
-            .map(RunMode::Record)
-            .ok_or_else(|| invalid_data("--record requires a path")),
-        Some(value) if value == "--replay" => args
-            .next()
-            .map(PathBuf::from)
-            .map(RunMode::Replay)
-            .ok_or_else(|| invalid_data("--replay requires a path")),
-        Some(value) => Err(invalid_data(format!("unknown argument: {:?}", value))),
+fn run_mode(mut args: impl Iterator<Item = std::ffi::OsString>) -> io::Result<RunMode> {
+    let Some(flag) = args.next() else {
+        return Ok(RunMode::Normal);
+    };
+    if flag == "--agent" {
+        if let Some(extra) = args.next() {
+            return Err(invalid_data(format!("unexpected argument: {extra:?}")));
+        }
+        return Ok(RunMode::Agent);
     }
+    let mode = match flag.to_str() {
+        Some("--record") => RunMode::Record,
+        Some("--replay") => RunMode::Replay,
+        Some("--verify") => RunMode::Verify,
+        _ => return Err(invalid_data(format!("unknown argument: {flag:?}"))),
+    };
+    let path = args
+        .next()
+        .filter(|path| !path.is_empty() && !path.to_string_lossy().starts_with("--"))
+        .ok_or_else(|| invalid_data(format!("{} requires a path", flag.to_string_lossy())))?;
+    if let Some(extra) = args.next() {
+        return Err(invalid_data(format!("unexpected argument: {extra:?}")));
+    }
+    Ok(mode(PathBuf::from(path)))
+}
+
+fn run_agent() -> io::Result<()> {
+    let mut engine = load_engine()?;
+    let stdin = io::stdin();
+    let mut stdout = io::stdout().lock();
+    for line in BufReader::new(stdin.lock()).lines() {
+        let line = line?;
+        let command = match parse_agent_command(&line) {
+            Ok(command) => command,
+            Err(error) => {
+                writeln!(stdout, "{{\"error\":{}}}", json_string(&error))?;
+                stdout.flush()?;
+                continue;
+            }
+        };
+        let Some(command) = command else {
+            continue;
+        };
+        if command == AgentCommand::Quit {
+            writeln!(stdout, "{{\"ok\":true,\"quit\":true}}")?;
+            break;
+        }
+        let AgentCommand::Game(command) = command else {
+            unreachable!("quit handled above");
+        };
+        let result = engine.dispatch(command);
+        let events = engine.drain_events();
+        writeln!(
+            stdout,
+            "{{\"result\":{},\"events\":{},\"snapshot\":{}}}",
+            json_value(&result),
+            json_value(&events),
+            json_value(&engine.snapshot())
+        )?;
+        stdout.flush()?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentCommand {
+    Game(Command),
+    Quit,
+}
+
+fn parse_agent_command(line: &str) -> Result<Option<AgentCommand>, String> {
+    let mut words = line.split_whitespace();
+    let Some(action) = words.next() else {
+        return Ok(None);
+    };
+    let command = match action {
+        "move" => {
+            let direction = match words.next() {
+                Some("up") => Direction::Up,
+                Some("down") => Direction::Down,
+                Some("left") => Direction::Left,
+                Some("right") => Direction::Right,
+                Some(direction) => return Err(format!("invalid direction: {direction}")),
+                None => return Err("move requires a direction".to_owned()),
+            };
+            AgentCommand::Game(Command::Move(direction))
+        }
+        "wait" => AgentCommand::Game(Command::Wait),
+        "pickup" => AgentCommand::Game(Command::Pickup),
+        "descend" => AgentCommand::Game(Command::Descend),
+        "restart" => AgentCommand::Game(Command::Restart),
+        "use" => {
+            let slot = words
+                .next()
+                .ok_or_else(|| "use requires an inventory slot".to_owned())?
+                .parse::<u8>()
+                .map_err(|_| "use slot must be an integer from 0 to 8".to_owned())?;
+            if slot >= 9 {
+                return Err("use slot must be an integer from 0 to 8".to_owned());
+            }
+            AgentCommand::Game(Command::UseItem(slot))
+        }
+        "quit" => AgentCommand::Quit,
+        _ => return Err(format!("unknown command: {action}")),
+    };
+    if words.next().is_some() {
+        return Err("unexpected extra arguments".to_owned());
+    }
+    Ok(Some(command))
+}
+
+fn json_value<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value).expect("agent response is serializable")
+}
+
+fn json_string(value: &str) -> String {
+    json_value(&value)
 }
 
 fn invalid_data(error: impl std::fmt::Display) -> io::Error {
@@ -260,6 +412,142 @@ fn record_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn key(code: KeyCode) -> Event {
+        Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn replay_starts_paused_and_steps_exactly_one_command_per_press() {
+        let mut replay = ReplayPlayback {
+            commands: vec![Command::Wait, Command::Descend, Command::Restart],
+            ..ReplayPlayback::default()
+        };
+        let mut engine = Engine::default();
+        let initial = engine.snapshot();
+        let mut messages = VecDeque::new();
+        replay.handle_input(None, &mut engine, &mut messages);
+        assert!(!replay.playing);
+        assert_eq!(engine.snapshot(), initial);
+        let mut expected = Engine::default();
+        for (index, code) in [KeyCode::Char(' '), KeyCode::Enter, KeyCode::Enter]
+            .into_iter()
+            .enumerate()
+        {
+            assert!(!replay.handle_input(Some(key(code)), &mut engine, &mut messages));
+            expected.dispatch(replay.commands[index]);
+            assert_eq!(replay.index, index + 1);
+            assert_eq!(engine.snapshot(), expected.snapshot());
+            assert!(!replay.playing);
+        }
+        assert_eq!(engine.snapshot(), initial);
+        replay.handle_input(Some(key(KeyCode::Enter)), &mut engine, &mut messages);
+        assert_eq!(replay.index, 3);
+    }
+
+    #[test]
+    fn replay_ignores_gameplay_keys_and_repeat_release_events() {
+        let mut replay = ReplayPlayback {
+            commands: vec![Command::Wait],
+            ..ReplayPlayback::default()
+        };
+        let mut engine = Engine::default();
+        let initial = engine.snapshot();
+        let mut messages = VecDeque::new();
+        for code in [
+            KeyCode::Up,
+            KeyCode::Down,
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::Char('h'),
+            KeyCode::Char('j'),
+            KeyCode::Char('k'),
+            KeyCode::Char('l'),
+            KeyCode::Char('.'),
+            KeyCode::Char('g'),
+            KeyCode::Char('1'),
+            KeyCode::Char('9'),
+            KeyCode::Char('>'),
+            KeyCode::Char('r'),
+        ] {
+            replay.handle_input(Some(key(code)), &mut engine, &mut messages);
+        }
+        for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+            let mut event = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+            event.kind = kind;
+            replay.handle_input(Some(Event::Key(event)), &mut engine, &mut messages);
+        }
+        assert_eq!(replay.index, 0);
+        assert_eq!(engine.snapshot(), initial);
+    }
+
+    #[test]
+    fn autoplay_polls_and_handles_pause_quit_before_dispatch() {
+        let mut replay = ReplayPlayback {
+            commands: vec![Command::Wait; 3],
+            ..ReplayPlayback::default()
+        };
+        let mut engine = Engine::default();
+        let mut messages = VecDeque::new();
+        replay.handle_input(Some(key(KeyCode::Char('p'))), &mut engine, &mut messages);
+        assert!(replay.playing);
+        let tick = read_input(
+            replay.playing,
+            |timeout| {
+                assert_eq!(timeout, Duration::from_millis(80));
+                Ok(false)
+            },
+            || panic!("timeout must not read"),
+        )
+        .unwrap();
+        replay.handle_input(tick, &mut engine, &mut messages);
+        assert_eq!(replay.index, 1);
+        for code in [KeyCode::Char('p'), KeyCode::Char('q'), KeyCode::Esc] {
+            replay.playing = true;
+            let input = read_input(replay.playing, |_| Ok(true), || Ok(key(code))).unwrap();
+            let quit = replay.handle_input(input, &mut engine, &mut messages);
+            assert_eq!(quit, code != KeyCode::Char('p'));
+            assert_eq!(replay.index, 1);
+            if !quit {
+                assert!(!replay.playing);
+                replay.handle_input(None, &mut engine, &mut messages);
+                assert_eq!(replay.index, 1);
+            }
+        }
+        let input = read_input(
+            false,
+            |_| panic!("paused replay must block on read"),
+            || Ok(key(KeyCode::Enter)),
+        )
+        .unwrap();
+        replay.handle_input(input, &mut engine, &mut messages);
+        assert_eq!(replay.index, 2);
+        replay.handle_input(Some(key(KeyCode::Char('p'))), &mut engine, &mut messages);
+        replay.handle_input(None, &mut engine, &mut messages);
+        assert_eq!(replay.index, 3);
+        assert!(!replay.playing);
+        replay.handle_input(Some(key(KeyCode::Char('p'))), &mut engine, &mut messages);
+        assert!(!replay.playing);
+    }
+
+    #[test]
+    fn empty_replay_stays_complete_without_dispatch() {
+        let mut replay = ReplayPlayback::default();
+        let mut engine = Engine::default();
+        let initial = engine.snapshot();
+        let mut messages = VecDeque::new();
+        for input in [
+            Some(key(KeyCode::Char('p'))),
+            None,
+            Some(key(KeyCode::Enter)),
+            Some(key(KeyCode::Char(' '))),
+        ] {
+            replay.handle_input(input, &mut engine, &mut messages);
+            assert_eq!(replay.index, 0);
+            assert!(!replay.playing);
+        }
+        assert_eq!(engine.snapshot(), initial);
+    }
 
     #[test]
     fn loads_example_filesystem_mod() {

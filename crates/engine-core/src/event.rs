@@ -1,7 +1,7 @@
 use crate::{EntityId, Position};
 
 /// Event describing a simulation result without frontend-specific formatting.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum GameEvent {
     TurnStarted {
         turn: u64,

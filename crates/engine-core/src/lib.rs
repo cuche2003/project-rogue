@@ -125,7 +125,7 @@ impl Replay {
 use visibility::Visibility;
 
 /// Stable identity independent of ECS storage; unique within one run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct EntityId(pub u64);
 
 /// Cardinal movement directions. Y increases south.
@@ -138,7 +138,7 @@ pub enum Direction {
 }
 
 /// Current run state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum GamePhase {
     Playing,
     Victory,

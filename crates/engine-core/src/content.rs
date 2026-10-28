@@ -56,11 +56,20 @@ struct ContentFile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "ContentFile")]
 pub struct ContentPack {
     actors: Vec<ActorDefinition>,
     spawns: Vec<SpawnDefinition>,
     items: Vec<ItemDefinition>,
     item_spawns: Vec<ItemSpawnDefinition>,
+}
+
+impl TryFrom<ContentFile> for ContentPack {
+    type Error = ContentError;
+
+    fn try_from(file: ContentFile) -> Result<Self, Self::Error> {
+        Self::new(file.actors, file.spawns, file.items, file.item_spawns)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

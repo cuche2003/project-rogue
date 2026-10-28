@@ -1,12 +1,12 @@
 /// Coordinate in the game map. X increases east; Y increases south.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct Position {
     pub x: i32,
     pub y: i32,
 }
 
 /// Terrain occupying one map cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum Tile {
     Floor,
     Wall,

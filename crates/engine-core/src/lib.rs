@@ -39,6 +39,8 @@ pub enum ReplayError {
     Serialize(String),
     Parse(String),
     UnsupportedVersion(u16),
+    Playback(String),
+    Diverged { command: usize },
 }
 
 impl std::fmt::Display for ReplayError {
@@ -47,6 +49,8 @@ impl std::fmt::Display for ReplayError {
             Self::Serialize(error) => write!(f, "replay serialization failed: {error}"),
             Self::Parse(error) => write!(f, "replay parse failed: {error}"),
             Self::UnsupportedVersion(version) => write!(f, "unsupported replay version {version}"),
+            Self::Playback(error) => write!(f, "replay playback failed: {error}"),
+            Self::Diverged { command } => write!(f, "replay diverged after command {command}"),
         }
     }
 }
@@ -85,13 +89,37 @@ impl Replay {
         &self.commands
     }
 
+    /// Creates fresh engine at replay start state.
+    pub fn start(&self) -> Result<Engine, EngineError> {
+        Engine::with_content(self.config, self.content.clone())
+    }
+
     /// Rebuilds a run by dispatching every recorded command from its original start state.
     pub fn playback(&self) -> Result<Engine, EngineError> {
-        let mut engine = Engine::with_content(self.config, self.content.clone())?;
+        let mut engine = self.start()?;
         for &command in &self.commands {
             engine.dispatch(command);
         }
         Ok(engine)
+    }
+
+    /// Runs replay twice and checks every command produces identical state and events.
+    pub fn verify(&self) -> Result<(), ReplayError> {
+        let mut first = self
+            .start()
+            .map_err(|error| ReplayError::Playback(error.to_string()))?;
+        let mut second = self
+            .start()
+            .map_err(|error| ReplayError::Playback(error.to_string()))?;
+        for (index, &command) in self.commands.iter().enumerate() {
+            if first.dispatch(command) != second.dispatch(command)
+                || first.snapshot() != second.snapshot()
+                || first.drain_events() != second.drain_events()
+            {
+                return Err(ReplayError::Diverged { command: index });
+            }
+        }
+        Ok(())
     }
 }
 use visibility::Visibility;

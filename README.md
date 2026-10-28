@@ -6,7 +6,7 @@ Terminal-first roguelike built in Rust.
 
 - `crates/engine-core`: deterministic, UI-independent game state and rules backed by `bevy_ecs`.
 - `crates/engine-wasm`: WebAssembly bindings for the engine.
-- `crates/terminal-ui`: Ratatui + Crossterm frontend.
+- `crates/terminal-ui`: Ratatui + Crossterm frontend. Replay mode steps with Space/Enter or plays automatically with `p`.
 - `apps/web`: future web frontend.
 
 Engine has no terminal or rendering dependencies, so frontends can evolve independently.
@@ -15,6 +15,8 @@ Engine has no terminal or rendering dependencies, so frontends can evolve indepe
 
 ```sh
 cargo run -p terminal-ui
+cargo run -p terminal-ui -- --record run.ron
+cargo run -p terminal-ui -- --replay run.ron
 ```
 
 Controls: arrows or `hjkl` move and bump-attack; `.` or Space waits; `g` picks up items; `1`-`9` uses inventory items; `>` descends; `r` restarts; `q` or `Esc` quits.

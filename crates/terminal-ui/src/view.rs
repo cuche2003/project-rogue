@@ -14,7 +14,12 @@ const TEXT: Color = Color::Rgb(214, 222, 235);
 const MUTED: Color = Color::Rgb(112, 131, 153);
 const ACCENT: Color = Color::Rgb(104, 214, 196);
 
-pub fn draw(frame: &mut Frame, snapshot: &RenderSnapshot, messages: &VecDeque<String>) {
+pub fn draw(
+    frame: &mut Frame,
+    snapshot: &RenderSnapshot,
+    messages: &VecDeque<String>,
+    replay: Option<(usize, usize, bool)>,
+) {
     let area = frame.area();
     frame.render_widget(
         Block::default().style(Style::default().bg(BACKGROUND).fg(TEXT)),
@@ -158,9 +163,14 @@ pub fn draw(frame: &mut Frame, snapshot: &RenderSnapshot, messages: &VecDeque<St
         .collect();
     frame.render_widget(Paragraph::new(lines).block(panel(" Log ")), log);
     frame.render_widget(
-        Paragraph::new(
-            "Arrows/hjkl: move/attack\n./Space: wait  >: descend\nr: restart  q/Esc: quit",
-        )
+        Paragraph::new(match replay {
+            Some((index, total, playing)) => format!(
+                "Replay {index}/{total} {}\nSpace/Enter: step p: play/pause\nq/Esc: quit",
+                if playing { "[playing]" } else { "[paused]" }
+            ),
+            None => "Arrows/hjkl: move/attack\n./Space: wait  >: descend\nr: restart  q/Esc: quit"
+                .to_owned(),
+        })
         .style(Style::default().fg(MUTED)),
         controls,
     );
@@ -224,6 +234,7 @@ mod tests {
                     frame,
                     snapshot,
                     &VecDeque::from(["Latest message.".to_owned()]),
+                    None,
                 );
             })
             .unwrap();

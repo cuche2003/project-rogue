@@ -382,6 +382,7 @@ fn replay_playback_reproduces_snapshot_and_events() {
     let decoded = Replay::from_ron(&encoded).unwrap();
     let decoded_playback = decoded.playback().unwrap();
     assert_eq!(decoded_playback.snapshot(), playback.snapshot());
+    replay.verify().unwrap();
     assert!(matches!(
         Replay::from_ron(
             "(version: 2, config: (seed: 0, map_width: 8, map_height: 8, floor_count: 1), content: (actors: [], spawns: [], items: [], item_spawns: []), commands: [])"

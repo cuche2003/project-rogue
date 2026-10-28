@@ -4,6 +4,7 @@ use std::{
     collections::VecDeque,
     env, fs, io,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
@@ -25,8 +26,13 @@ fn main() -> io::Result<()> {
 
 fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
     let mode = run_mode()?;
+    let mut replay_commands = None;
     let mut engine = match &mode {
-        RunMode::Replay(path) => load_replay(path)?.playback().map_err(invalid_data)?,
+        RunMode::Replay(path) => {
+            let replay = load_replay(path)?;
+            replay_commands = Some(replay.commands().to_vec());
+            replay.start().map_err(invalid_data)?
+        }
         RunMode::Normal | RunMode::Record(_) => {
             let mut engine = load_engine()?;
             if matches!(mode, RunMode::Record(_)) {
@@ -35,12 +41,41 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
             engine
         }
     };
-    let mut messages =
-        VecDeque::from(["Explore, find >, then press > on stairs to win.".to_owned()]);
+    let mut replay_index = 0;
+    let mut messages = VecDeque::from([match &mode {
+        RunMode::Replay(_) => "Replay: press Space to step, p to play/pause, q to quit.".to_owned(),
+        RunMode::Normal | RunMode::Record(_) => {
+            "Explore, find >, then press > on stairs to win.".to_owned()
+        }
+    }]);
+    let mut replay_playing = false;
 
     loop {
         let snapshot = engine.snapshot();
-        terminal.draw(|frame| view::draw(frame, &snapshot, &messages))?;
+        terminal.draw(|frame| {
+            view::draw(
+                frame,
+                &snapshot,
+                &messages,
+                replay_commands
+                    .as_ref()
+                    .map(|commands| (replay_index, commands.len(), replay_playing)),
+            )
+        })?;
+
+        if matches!(mode, RunMode::Replay(_)) && replay_playing {
+            if replay_index < replay_commands.as_ref().expect("replay commands").len() {
+                dispatch_command(
+                    &mut engine,
+                    replay_commands.as_ref().expect("replay commands")[replay_index],
+                    &mut messages,
+                );
+                replay_index += 1;
+                std::thread::sleep(Duration::from_millis(80));
+                continue;
+            }
+            replay_playing = false;
+        }
 
         let Event::Key(key) = event::read()? else {
             // Redraw after resize; no polling or idle simulation ticks.
@@ -55,31 +90,53 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
             }
             return Ok(());
         }
+        if let RunMode::Replay(_) = mode {
+            match key.code {
+                KeyCode::Char(' ') | KeyCode::Enter
+                    if replay_index < replay_commands.as_ref().expect("replay commands").len() =>
+                {
+                    dispatch_command(
+                        &mut engine,
+                        replay_commands.as_ref().expect("replay commands")[replay_index],
+                        &mut messages,
+                    );
+                    replay_index += 1;
+                }
+                KeyCode::Char('p') => replay_playing = !replay_playing,
+                _ => {}
+            }
+            continue;
+        }
         let Some(command) = command_for(key) else {
             continue;
         };
-        let result = engine.dispatch(command);
-        if command == Command::Restart {
-            messages.clear();
-            messages.push_back("Restarted same seed. Find > and descend.".to_owned());
-        }
-        record_events(&mut messages, &snapshot.entities, engine.drain_events());
-        if let CommandResult::Rejected(error) = result {
-            messages.push_back(
-                match error {
-                    CommandError::Blocked => "Blocked. No turn spent.",
-                    CommandError::GameOver => "Run ended. Press r to restart or q to quit.",
-                    CommandError::NoStairs => "No stairs here. Find > and stand on it.",
-                    CommandError::InvalidTarget => "Invalid target.",
-                    CommandError::NoItem => "No item here or in that inventory slot.",
-                    CommandError::InventoryFull => "Inventory full.",
-                }
-                .to_owned(),
-            );
-        }
-        while messages.len() > LOG_LIMIT {
-            messages.pop_front();
-        }
+        dispatch_command(&mut engine, command, &mut messages);
+    }
+}
+
+fn dispatch_command(engine: &mut Engine, command: Command, messages: &mut VecDeque<String>) {
+    let before = engine.snapshot();
+    let result = engine.dispatch(command);
+    if command == Command::Restart {
+        messages.clear();
+        messages.push_back("Restarted same seed. Find > and descend.".to_owned());
+    }
+    record_events(messages, &before.entities, engine.drain_events());
+    if let CommandResult::Rejected(error) = result {
+        messages.push_back(
+            match error {
+                CommandError::Blocked => "Blocked. No turn spent.",
+                CommandError::GameOver => "Run ended. Press r to restart or q to quit.",
+                CommandError::NoStairs => "No stairs here. Find > and stand on it.",
+                CommandError::InvalidTarget => "Invalid target.",
+                CommandError::NoItem => "No item here or in that inventory slot.",
+                CommandError::InventoryFull => "Inventory full.",
+            }
+            .to_owned(),
+        );
+    }
+    while messages.len() > LOG_LIMIT {
+        messages.pop_front();
     }
 }
 

@@ -20,7 +20,7 @@ pub struct Phase(pub GamePhase);
 pub struct NextEntityId(pub u64);
 
 /// Reproducible run configuration. Dimensions must each be in 8..=256.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource, serde::Serialize, serde::Deserialize)]
 pub struct GameConfig {
     pub seed: u64,
     pub map_width: u16,

@@ -1,11 +1,15 @@
 #![forbid(unsafe_code)]
 
-use std::{collections::VecDeque, fs, io, path::Path};
+use std::{
+    collections::VecDeque,
+    env, fs, io,
+    path::{Path, PathBuf},
+};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use project_rogue_engine_core::{
     Command, CommandError, CommandResult, ContentPack, Direction, Engine, EntitySnapshot,
-    GameConfig, GameEvent,
+    GameConfig, GameEvent, Replay,
 };
 
 mod view;
@@ -20,7 +24,17 @@ fn main() -> io::Result<()> {
 }
 
 fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
-    let mut engine = load_engine()?;
+    let mode = run_mode()?;
+    let mut engine = match &mode {
+        RunMode::Replay(path) => load_replay(path)?.playback().map_err(invalid_data)?,
+        RunMode::Normal | RunMode::Record(_) => {
+            let mut engine = load_engine()?;
+            if matches!(mode, RunMode::Record(_)) {
+                engine.start_recording();
+            }
+            engine
+        }
+    };
     let mut messages =
         VecDeque::from(["Explore, find >, then press > on stairs to win.".to_owned()]);
 
@@ -36,6 +50,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
             continue;
         }
         if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
+            if let (RunMode::Record(path), Some(replay)) = (&mode, engine.stop_recording()) {
+                fs::write(path, replay.to_ron().map_err(invalid_data)?)?;
+            }
             return Ok(());
         }
         let Some(command) = command_for(key) else {
@@ -64,6 +81,38 @@ fn run(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
             messages.pop_front();
         }
     }
+}
+
+enum RunMode {
+    Normal,
+    Record(PathBuf),
+    Replay(PathBuf),
+}
+
+fn run_mode() -> io::Result<RunMode> {
+    let mut args = env::args_os().skip(1);
+    match args.next().as_deref() {
+        None => Ok(RunMode::Normal),
+        Some(value) if value == "--record" => args
+            .next()
+            .map(PathBuf::from)
+            .map(RunMode::Record)
+            .ok_or_else(|| invalid_data("--record requires a path")),
+        Some(value) if value == "--replay" => args
+            .next()
+            .map(PathBuf::from)
+            .map(RunMode::Replay)
+            .ok_or_else(|| invalid_data("--replay requires a path")),
+        Some(value) => Err(invalid_data(format!("unknown argument: {:?}", value))),
+    }
+}
+
+fn invalid_data(error: impl std::fmt::Display) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, error.to_string())
+}
+
+fn load_replay(path: &Path) -> io::Result<Replay> {
+    Replay::from_ron(&fs::read_to_string(path)?).map_err(invalid_data)
 }
 
 fn load_engine() -> io::Result<Engine> {

@@ -31,15 +31,54 @@ pub use snapshot::{
 };
 pub use systems::TurnSet;
 
-/// Deterministic command recording for reproducing a run.
+const REPLAY_VERSION: u16 = 1;
+
+/// Failure while serializing or parsing a replay.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplayError {
+    Serialize(String),
+    Parse(String),
+    UnsupportedVersion(u16),
+}
+
+impl std::fmt::Display for ReplayError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Serialize(error) => write!(f, "replay serialization failed: {error}"),
+            Self::Parse(error) => write!(f, "replay parse failed: {error}"),
+            Self::UnsupportedVersion(version) => write!(f, "unsupported replay version {version}"),
+        }
+    }
+}
+
+impl std::error::Error for ReplayError {}
+
+/// Deterministic command recording for reproducing a run.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Replay {
+    version: u16,
     config: GameConfig,
     content: ContentPack,
     commands: Vec<Command>,
 }
 
 impl Replay {
+    /// Serializes replay as versioned RON.
+    pub fn to_ron(&self) -> Result<String, ReplayError> {
+        ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())
+            .map_err(|error| ReplayError::Serialize(error.to_string()))
+    }
+
+    /// Parses a versioned RON replay.
+    pub fn from_ron(source: &str) -> Result<Self, ReplayError> {
+        let replay: Self =
+            ron::from_str(source).map_err(|error| ReplayError::Parse(error.to_string()))?;
+        if replay.version != REPLAY_VERSION {
+            return Err(ReplayError::UnsupportedVersion(replay.version));
+        }
+        Ok(replay)
+    }
+
     /// Returns recorded commands in dispatch order, including rejected commands and restarts.
     #[must_use]
     pub fn commands(&self) -> &[Command] {
@@ -62,7 +101,7 @@ use visibility::Visibility;
 pub struct EntityId(pub u64);
 
 /// Cardinal movement directions. Y increases south.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Direction {
     Up,
     Down,
@@ -356,6 +395,7 @@ impl Engine {
     /// Stops recording and returns original run configuration plus commands.
     pub fn stop_recording(&mut self) -> Option<Replay> {
         self.replay.take().map(|commands| Replay {
+            version: REPLAY_VERSION,
             config: self.config,
             content: self.content.clone(),
             commands,

@@ -378,6 +378,16 @@ fn replay_playback_reproduces_snapshot_and_events() {
     assert_eq!(engine.snapshot(), playback.snapshot());
     assert_eq!(engine.drain_events(), playback.drain_events());
     assert_eq!(replay.commands().len(), 6);
+    let encoded = replay.to_ron().unwrap();
+    let decoded = Replay::from_ron(&encoded).unwrap();
+    let decoded_playback = decoded.playback().unwrap();
+    assert_eq!(decoded_playback.snapshot(), playback.snapshot());
+    assert!(matches!(
+        Replay::from_ron(
+            "(version: 2, config: (seed: 0, map_width: 8, map_height: 8, floor_count: 1), content: (actors: [], spawns: [], items: [], item_spawns: []), commands: [])"
+        ),
+        Err(ReplayError::UnsupportedVersion(2))
+    ));
 }
 
 #[test]

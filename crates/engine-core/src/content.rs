@@ -1,13 +1,13 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BehaviorKind {
     Passive,
     Chase,
     Guard,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActorDefinition {
     pub id: String,
     pub name: String,
@@ -17,18 +17,18 @@ pub struct ActorDefinition {
     pub behavior: BehaviorKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpawnDefinition {
     pub actor_id: String,
     pub count: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ItemEffect {
     Heal,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemDefinition {
     pub id: String,
     pub name: String,
@@ -38,7 +38,7 @@ pub struct ItemDefinition {
     pub power: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemSpawnDefinition {
     pub item_id: String,
     pub count: u32,
@@ -55,7 +55,7 @@ struct ContentFile {
     item_spawns: Vec<ItemSpawnDefinition>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContentPack {
     actors: Vec<ActorDefinition>,
     spawns: Vec<SpawnDefinition>,

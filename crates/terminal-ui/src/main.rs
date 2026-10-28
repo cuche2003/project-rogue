@@ -65,6 +65,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, mode: RunMode) -> io::Result<()>
     } else {
         "Explore, find >, then press > on stairs to win.".to_owned()
     }]);
+    let mut help = false;
 
     loop {
         let snapshot = engine.snapshot();
@@ -76,6 +77,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, mode: RunMode) -> io::Result<()>
                 playback
                     .as_ref()
                     .map(|replay| (replay.index, replay.commands.len(), replay.playing)),
+                help,
             )
         })?;
 
@@ -84,6 +86,22 @@ fn run(terminal: &mut ratatui::DefaultTerminal, mode: RunMode) -> io::Result<()>
             event::poll,
             event::read,
         )?;
+        if help {
+            if let Some(Event::Key(key)) = input
+                && key.kind == KeyEventKind::Press
+                && matches!(key.code, KeyCode::Char('?') | KeyCode::Esc)
+            {
+                help = false;
+            }
+            continue;
+        }
+        if let Some(Event::Key(key)) = &input
+            && key.kind == KeyEventKind::Press
+            && key.code == KeyCode::Char('?')
+        {
+            help = true;
+            continue;
+        }
         if let Some(replay) = &mut playback {
             if replay.handle_input(input, &mut engine, &mut messages) {
                 return Ok(());
@@ -94,6 +112,10 @@ fn run(terminal: &mut ratatui::DefaultTerminal, mode: RunMode) -> io::Result<()>
             continue;
         };
         if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        if key.code == KeyCode::Char('?') {
+            help = true;
             continue;
         }
         if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {

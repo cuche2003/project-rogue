@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
 const BACKGROUND: Color = Color::Rgb(16, 20, 29);
@@ -19,6 +19,7 @@ pub fn draw(
     snapshot: &RenderSnapshot,
     messages: &VecDeque<String>,
     replay: Option<(usize, usize, bool)>,
+    help: bool,
 ) {
     let area = frame.area();
     frame.render_widget(
@@ -38,7 +39,7 @@ pub fn draw(
         Constraint::Length(2),
         Constraint::Min(3),
         Constraint::Length(if area.height >= 18 { 5 } else { 3 }),
-        Constraint::Length(4),
+        Constraint::Length(if area.height >= 16 { 5 } else { 4 }),
     ])
     .areas(area);
     let hp = snapshot.player.health;
@@ -165,7 +166,7 @@ pub fn draw(
     frame.render_widget(
         Paragraph::new(match replay {
             Some((index, total, playing)) => format!(
-                "Replay {index}/{total} {}\nSpace/Enter: step p: play/pause\nq/Esc: quit",
+                "Replay {index}/{total} {}\nSpace/Enter: step p: play/pause\n?: help  q/Esc: quit",
                 if index == total {
                     "[complete]"
                 } else if playing {
@@ -174,11 +175,39 @@ pub fn draw(
                     "[paused]"
                 }
             ),
-            None => "Arrows/hjkl: move/attack\n./Space: wait  >: descend\nr: restart  q/Esc: quit"
+            None => "Move hjkl/keys Wait ./Space\nPickup g Use 1-9 Down >\nRestart r Quit q/Esc"
                 .to_owned(),
         })
         .style(Style::default().fg(MUTED)),
         controls,
+    );
+    if help {
+        draw_help(frame, replay.is_some());
+    }
+}
+
+fn draw_help(frame: &mut Frame, replay: bool) {
+    let area = frame.area();
+    let width = area.width.clamp(30, 58);
+    let height = if replay { 12 } else { 15 };
+    let popup = ratatui::layout::Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height: height.min(area.height),
+    };
+    frame.render_widget(Clear, popup);
+    let text = if replay {
+        "Replay controls\n\nSpace / Enter  step one command\np               play / pause\nq / Esc         quit replay\n\n?               close help"
+    } else {
+        "Gameplay controls\n\nArrows / hjkl   move and attack\n. / Space       wait\ng               pick up item\n1 - 9           use inventory item\n>               descend stairs\nr               restart run\nq / Esc         quit\n\n?               close help"
+    };
+    frame.render_widget(
+        Paragraph::new(text)
+            .block(panel(" Help "))
+            .style(Style::default().fg(TEXT).bg(BACKGROUND))
+            .wrap(Wrap { trim: false }),
+        popup,
     );
 }
 
@@ -241,6 +270,7 @@ mod tests {
                     snapshot,
                     &VecDeque::from(["Latest message.".to_owned()]),
                     None,
+                    false,
                 );
             })
             .unwrap();
@@ -310,6 +340,7 @@ mod tests {
                         &snapshot(),
                         &VecDeque::new(),
                         Some((index, total, playing)),
+                        false,
                     )
                 })
                 .unwrap();
@@ -330,6 +361,38 @@ mod tests {
     }
 
     #[test]
+    fn help_overlay_shows_gameplay_controls() {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &snapshot(), &VecDeque::new(), None, true))
+            .unwrap();
+        let rendered = text(terminal.backend().buffer());
+        assert!(rendered.contains("Gameplay controls"));
+        assert!(rendered.contains("g               pick up item"));
+        assert!(rendered.contains("?               close help"));
+    }
+
+    #[test]
+    fn help_overlay_shows_replay_controls() {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| {
+                draw(
+                    frame,
+                    &snapshot(),
+                    &VecDeque::new(),
+                    Some((0, 1, false)),
+                    true,
+                )
+            })
+            .unwrap();
+        let rendered = text(terminal.backend().buffer());
+        assert!(rendered.contains("Replay controls"));
+        assert!(rendered.contains("step one command"));
+        assert!(rendered.contains("?               close help"));
+    }
+
+    #[test]
     fn compact_terminal_keeps_status_log_and_all_controls_visible() {
         let snapshot = snapshot();
         let rendered = text(&render(&snapshot, 30, 12));
@@ -337,9 +400,9 @@ mod tests {
             "HP 10/10 | Turn 7",
             "Explore: find > then descend",
             "Latest message.",
-            "Arrows/hjkl: move/attack",
-            "./Space: wait  >: descend",
-            "r: restart  q/Esc: quit",
+            "Move hjkl/keys Wait ./Space",
+            "Pickup g Use 1-9 Down >",
+            "Restart r Quit q/Esc",
         ] {
             assert!(rendered.contains(label), "missing: {label}");
         }

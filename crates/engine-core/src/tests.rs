@@ -356,6 +356,43 @@ fn hidden_entities_and_unexplored_terrain_do_not_leak_into_snapshot() {
 }
 
 #[test]
+fn replay_playback_reproduces_snapshot_and_events() {
+    let mut engine = Engine::new(GameConfig {
+        seed: 17,
+        floor_count: 2,
+        ..GameConfig::default()
+    });
+    engine.start_recording();
+    for command in [
+        Command::Move(Direction::Right),
+        Command::Wait,
+        Command::Pickup,
+        Command::UseItem(0),
+        Command::Restart,
+        Command::Move(Direction::Down),
+    ] {
+        engine.dispatch(command);
+    }
+    let replay = engine.stop_recording().expect("recording started");
+    let mut playback = replay.playback().unwrap();
+    assert_eq!(engine.snapshot(), playback.snapshot());
+    assert_eq!(engine.drain_events(), playback.drain_events());
+    assert_eq!(replay.commands().len(), 6);
+}
+
+#[test]
+fn replay_records_rejected_commands_in_order() {
+    let mut engine = Engine::default();
+    engine.start_recording();
+    assert_eq!(
+        engine.dispatch(Command::UseItem(8)),
+        CommandResult::Rejected(CommandError::NoItem)
+    );
+    let replay = engine.stop_recording().unwrap();
+    assert_eq!(replay.commands(), &[Command::UseItem(8)]);
+}
+
+#[test]
 fn same_seed_and_commands_reproduce_snapshot_and_events() {
     for seed in 0..16 {
         let mut first = Engine::new(GameConfig {

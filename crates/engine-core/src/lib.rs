@@ -30,6 +30,31 @@ pub use snapshot::{
     EntitySnapshot, HealthSnapshot, ItemSnapshot, MapSnapshot, PlayerSnapshot, RenderSnapshot,
 };
 pub use systems::TurnSet;
+
+/// Deterministic command recording for reproducing a run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Replay {
+    config: GameConfig,
+    content: ContentPack,
+    commands: Vec<Command>,
+}
+
+impl Replay {
+    /// Returns recorded commands in dispatch order, including rejected commands and restarts.
+    #[must_use]
+    pub fn commands(&self) -> &[Command] {
+        &self.commands
+    }
+
+    /// Rebuilds a run by dispatching every recorded command from its original start state.
+    pub fn playback(&self) -> Result<Engine, EngineError> {
+        let mut engine = Engine::with_content(self.config, self.content.clone())?;
+        for &command in &self.commands {
+            engine.dispatch(command);
+        }
+        Ok(engine)
+    }
+}
 use visibility::Visibility;
 
 /// Stable identity independent of ECS storage; unique within one run.
@@ -117,6 +142,7 @@ pub struct Engine {
     player: Entity,
     config: GameConfig,
     content: ContentPack,
+    replay: Option<Vec<Command>>,
 }
 
 impl Engine {
@@ -274,6 +300,7 @@ impl Engine {
             player,
             config,
             content,
+            replay: None,
         })
     }
 
@@ -321,11 +348,30 @@ impl Engine {
         self.config.seed
     }
 
+    /// Starts recording commands from current engine state.
+    pub fn start_recording(&mut self) {
+        self.replay = Some(Vec::new());
+    }
+
+    /// Stops recording and returns original run configuration plus commands.
+    pub fn stop_recording(&mut self) -> Option<Replay> {
+        self.replay.take().map(|commands| Replay {
+            config: self.config,
+            content: self.content.clone(),
+            commands,
+        })
+    }
+
     /// Rejected commands spend no turn. Restart reproduces the original seed/configuration.
     pub fn dispatch(&mut self, command: Command) -> CommandResult {
+        if let Some(commands) = &mut self.replay {
+            commands.push(command);
+        }
         if command == Command::Restart {
+            let replay = self.replay.take();
             *self = Self::with_content(self.config, self.content.clone())
                 .expect("validated configuration");
+            self.replay = replay;
             return CommandResult::Applied;
         }
         if let Err(error) = systems::validate(&mut self.world, command) {

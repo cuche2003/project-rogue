@@ -64,9 +64,8 @@ fn agent_reports_parse_errors_without_stopping() {
 
 #[test]
 fn agent_supports_all_game_commands_with_json_responses() {
-    let (output, responses) = run_agent(
-        "move right\nwait\npickup\nuse 0\ndescend\nrestart\nquit\n",
-    );
+    let (output, responses) =
+        run_agent("move right\nwait\npickup\nuse 0\ndescend\nrestart\nquit\n");
     assert!(output.status.success(), "{output:?}");
     assert_eq!(responses.len(), 7);
     for response in &responses[..6] {

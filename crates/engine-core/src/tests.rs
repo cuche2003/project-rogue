@@ -107,6 +107,53 @@ fn accepted_turn_moves_enemy_once_and_rejected_commands_change_nothing() {
 }
 
 #[test]
+fn effect_resolver_suppresses_duplicate_deaths() {
+    let mut engine = adjacent_enemy_game();
+    let enemy = enemy(&mut engine);
+    engine
+        .world
+        .get_mut::<Health>(enemy)
+        .expect("enemy health")
+        .current = 0;
+
+    systems::resolve_effects(
+        &mut engine.world,
+        [
+            systems::EffectWork::Death { entity: enemy },
+            systems::EffectWork::Death { entity: enemy },
+        ],
+    );
+
+    assert_eq!(
+        engine.drain_events(),
+        vec![GameEvent::EntityDied {
+            entity: EntityId(1),
+            position: Position { x: 3, y: 2 },
+        }]
+    );
+    assert!(engine.world.get::<Health>(enemy).is_none());
+}
+
+#[test]
+fn effect_resolver_stops_at_work_limit() {
+    let mut engine = fixture();
+    let player = engine.player;
+    systems::resolve_effects(
+        &mut engine.world,
+        (0..1025).map(|_| systems::EffectWork::Heal {
+            source: None,
+            target: player,
+            amount: 0,
+        }),
+    );
+
+    assert_eq!(
+        engine.drain_events(),
+        vec![GameEvent::EffectLimitReached { limit: 1024 }]
+    );
+}
+
+#[test]
 fn player_damage_cleanup_precedes_enemy_response_and_death_frees_tile() {
     let mut engine = adjacent_enemy_game();
     for hp in [2, 1] {
@@ -119,12 +166,16 @@ fn player_damage_cleanup_precedes_enemy_response_and_death_frees_tile() {
             engine.drain_events(),
             vec![
                 GameEvent::DamageTaken {
+                    source: Some(EntityId(0)),
                     target: EntityId(1),
+                    target_position: Position { x: 3, y: 2 },
                     amount: 1,
                     remaining_hp: hp
                 },
                 GameEvent::DamageTaken {
+                    source: Some(EntityId(1)),
                     target: EntityId(0),
+                    target_position: Position { x: 2, y: 2 },
                     amount: 1,
                     remaining_hp: 7 + hp
                 },
@@ -136,12 +187,15 @@ fn player_damage_cleanup_precedes_enemy_response_and_death_frees_tile() {
         engine.drain_events(),
         vec![
             GameEvent::DamageTaken {
+                source: Some(EntityId(0)),
                 target: EntityId(1),
+                target_position: Position { x: 3, y: 2 },
                 amount: 1,
                 remaining_hp: 0
             },
             GameEvent::EntityDied {
-                entity: EntityId(1)
+                entity: EntityId(1),
+                position: Position { x: 3, y: 2 },
             },
         ]
     );
@@ -179,12 +233,15 @@ fn defeat_stops_remaining_enemies_and_rejects_future_turns() {
         engine.drain_events(),
         vec![
             GameEvent::DamageTaken {
+                source: Some(EntityId(1)),
                 target: EntityId(0),
+                target_position: Position { x: 2, y: 2 },
                 amount: 1,
                 remaining_hp: 0
             },
             GameEvent::EntityDied {
-                entity: EntityId(0)
+                entity: EntityId(0),
+                position: Position { x: 2, y: 2 },
             },
             GameEvent::Defeat,
         ]
@@ -389,6 +446,43 @@ fn replay_playback_reproduces_snapshot_and_events() {
         ),
         Err(ReplayError::UnsupportedVersion(2))
     ));
+}
+
+#[test]
+fn entity_snapshots_include_health_while_hidden_entities_stay_hidden() {
+    let mut engine = fixture();
+    let enemy = enemy(&mut engine);
+    engine
+        .world
+        .entity_mut(enemy)
+        .insert(GridPosition(Position { x: 3, y: 2 }));
+    systems::update_visibility(&mut engine.world);
+    let entity = engine
+        .snapshot()
+        .entities
+        .into_iter()
+        .find(|entity| entity.id == EntityId(1))
+        .unwrap();
+    assert_eq!(
+        entity.health,
+        Some(HealthSnapshot {
+            current: 3,
+            maximum: 3,
+        })
+    );
+
+    engine
+        .world
+        .entity_mut(enemy)
+        .insert(GridPosition(Position { x: 11, y: 2 }));
+    systems::update_visibility(&mut engine.world);
+    assert!(
+        engine
+            .snapshot()
+            .entities
+            .iter()
+            .all(|entity| entity.id != EntityId(1))
+    );
 }
 
 #[test]

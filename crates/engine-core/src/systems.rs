@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use bevy_ecs::prelude::*;
 
@@ -166,24 +166,161 @@ fn move_actor(world: &mut World, entity: Entity, to: Position) {
         });
 }
 
+const EFFECT_WORK_LIMIT: usize = 1024;
+
+pub(crate) enum EffectWork {
+    Damage {
+        source: Option<Entity>,
+        target: Entity,
+        amount: u32,
+    },
+    Heal {
+        source: Option<Entity>,
+        target: Entity,
+        amount: u32,
+    },
+    Death {
+        entity: Entity,
+    },
+}
+
+pub(crate) fn resolve_effects(world: &mut World, initial: impl IntoIterator<Item = EffectWork>) {
+    let mut queue = VecDeque::from_iter(initial);
+    let mut deaths = HashSet::new();
+    let mut processed = 0;
+    while let Some(work) = queue.pop_front() {
+        processed += 1;
+        if processed > EFFECT_WORK_LIMIT {
+            world
+                .resource_mut::<Events>()
+                .0
+                .push(GameEvent::EffectLimitReached {
+                    limit: EFFECT_WORK_LIMIT,
+                });
+            break;
+        }
+        match work {
+            EffectWork::Damage {
+                source,
+                target,
+                amount,
+            } => {
+                let Some((id, position, remaining_hp)) = world
+                    .get::<Identity>(target)
+                    .zip(world.get::<GridPosition>(target))
+                    .zip(world.get::<Health>(target))
+                    .map(|((identity, position), health)| {
+                        (
+                            identity.0,
+                            position.0,
+                            health.current.saturating_sub(amount),
+                        )
+                    })
+                else {
+                    continue;
+                };
+                world
+                    .get_mut::<Health>(target)
+                    .expect("combat health")
+                    .current = remaining_hp;
+                let source = source
+                    .and_then(|entity| world.get::<Identity>(entity).map(|identity| identity.0));
+                world
+                    .resource_mut::<Events>()
+                    .0
+                    .push(GameEvent::DamageTaken {
+                        source,
+                        target: id,
+                        target_position: position,
+                        amount,
+                        remaining_hp,
+                    });
+                if remaining_hp == 0 {
+                    queue.push_back(EffectWork::Death { entity: target });
+                }
+            }
+            EffectWork::Heal {
+                source,
+                target,
+                amount,
+            } => {
+                let Some((id, position, current, maximum)) = world
+                    .get::<Identity>(target)
+                    .zip(world.get::<GridPosition>(target))
+                    .zip(world.get::<Health>(target))
+                    .map(|((identity, position), health)| {
+                        (identity.0, position.0, health.current, health.maximum)
+                    })
+                else {
+                    continue;
+                };
+                let current_hp = current.saturating_add(amount).min(maximum);
+                let restored = current_hp - current;
+                world
+                    .get_mut::<Health>(target)
+                    .expect("combat health")
+                    .current = current_hp;
+                if restored > 0 {
+                    let source = source.and_then(|entity| {
+                        world.get::<Identity>(entity).map(|identity| identity.0)
+                    });
+                    world
+                        .resource_mut::<Events>()
+                        .0
+                        .push(GameEvent::HealthRestored {
+                            source,
+                            target: id,
+                            target_position: position,
+                            amount: restored,
+                            current_hp,
+                        });
+                }
+            }
+            EffectWork::Death { entity } => {
+                if !deaths.insert(entity) {
+                    continue;
+                }
+                let Some((id, position)) = world
+                    .get::<Identity>(entity)
+                    .zip(world.get::<GridPosition>(entity))
+                    .map(|(identity, position)| (identity.0, position.0))
+                else {
+                    continue;
+                };
+                if world
+                    .get::<Health>(entity)
+                    .is_none_or(|health| health.current != 0)
+                {
+                    continue;
+                }
+                let player = world.resource::<PlayerEntity>().0;
+                if entity != player {
+                    world.despawn(entity);
+                }
+                world
+                    .resource_mut::<Events>()
+                    .0
+                    .push(GameEvent::EntityDied {
+                        entity: id,
+                        position,
+                    });
+            }
+        }
+    }
+}
+
 fn damage(world: &mut World, attacker: Entity, target: Entity) {
-    let id = world.get::<Identity>(target).expect("combat identity").0;
     let amount = world
         .get::<AttackDamage>(attacker)
         .map_or(1, |damage| damage.0);
-    let remaining_hp = {
-        let mut health = world.get_mut::<Health>(target).expect("combat health");
-        health.current = health.current.saturating_sub(amount);
-        health.current
-    };
-    world
-        .resource_mut::<Events>()
-        .0
-        .push(GameEvent::DamageTaken {
-            target: id,
+    resolve_effects(
+        world,
+        [EffectWork::Damage {
+            source: Some(attacker),
+            target,
             amount,
-            remaining_hp,
-        });
+        }],
+    );
 }
 
 fn player_action(world: &mut World) {
@@ -241,16 +378,7 @@ fn player_action(world: &mut World) {
             .item(&item_id)
             .expect("validated item")
             .clone();
-        match item.effect {
-            crate::ItemEffect::Heal => {
-                let mut health = world.get_mut::<Health>(player).expect("player health");
-                health.current = health
-                    .current
-                    .saturating_add(item.power)
-                    .min(health.maximum);
-            }
-        }
-        let item_id = {
+        let inventory_id = {
             let mut inventory = world.resource_mut::<Inventory>();
             let id = inventory.0[index as usize].id;
             inventory.0[index as usize].quantity -= 1;
@@ -259,10 +387,26 @@ fn player_action(world: &mut World) {
             }
             id
         };
-        world
-            .resource_mut::<Events>()
-            .0
-            .push(GameEvent::ItemUsed { item: item_id });
+        let amount = match item.effect {
+            crate::ItemEffect::Heal => item.power,
+        };
+        resolve_effects(
+            world,
+            [EffectWork::Heal {
+                source: Some(player),
+                target: player,
+                amount,
+            }],
+        );
+        let target = world.get::<Identity>(player).expect("player identity").0;
+        world.resource_mut::<Events>().0.push(GameEvent::ItemUsed {
+            item: inventory_id,
+            item_id: item.id,
+            item_name: item.name,
+            effect: item.effect,
+            target,
+            amount,
+        });
         return;
     }
     let Command::Move(direction) = command else {
@@ -285,13 +429,11 @@ fn cleanup(world: &mut World) {
         .map(|(entity, id, _)| (id.0, entity))
         .collect();
     dead.sort_unstable_by_key(|(id, _)| id.0);
-    for (id, entity) in dead {
-        world.despawn(entity);
-        world
-            .resource_mut::<Events>()
-            .0
-            .push(GameEvent::EntityDied { entity: id });
-    }
+    resolve_effects(
+        world,
+        dead.into_iter()
+            .map(|(_, entity)| EffectWork::Death { entity }),
+    );
 }
 
 fn enemy_actions(world: &mut World) {
@@ -383,12 +525,8 @@ fn outcome(world: &mut World) {
     world.resource_mut::<Turn>().0 += 1;
     let player = world.resource::<PlayerEntity>().0;
     if world.get::<Health>(player).expect("player health").current == 0 {
-        let id = world.get::<Identity>(player).expect("player identity").0;
         world.resource_mut::<Phase>().0 = GamePhase::Defeat;
-        world
-            .resource_mut::<Events>()
-            .0
-            .extend([GameEvent::EntityDied { entity: id }, GameEvent::Defeat]);
+        world.resource_mut::<Events>().0.push(GameEvent::Defeat);
     }
 }
 

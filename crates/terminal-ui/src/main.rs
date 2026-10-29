@@ -405,6 +405,7 @@ fn record_events(
                 target,
                 amount,
                 remaining_hp,
+                ..
             } => {
                 let name = before
                     .iter()
@@ -412,7 +413,19 @@ fn record_events(
                     .map_or("Entity", |entity| entity.name.as_str());
                 format!("{name} takes {amount} damage ({remaining_hp} HP left).")
             }
-            GameEvent::EntityDied { entity } => {
+            GameEvent::HealthRestored {
+                target,
+                amount,
+                current_hp,
+                ..
+            } => {
+                let name = before
+                    .iter()
+                    .find(|entity| entity.id == target)
+                    .map_or("Entity", |entity| entity.name.as_str());
+                format!("{name} restores {amount} HP ({current_hp} HP).")
+            }
+            GameEvent::EntityDied { entity, .. } => {
                 let name = before
                     .iter()
                     .find(|entry| entry.id == entity)
@@ -422,7 +435,14 @@ fn record_events(
             GameEvent::Defeat => "Defeat. Press r to restart.".to_owned(),
             GameEvent::Victory => "Victory! Press r to restart.".to_owned(),
             GameEvent::ItemPickedUp { .. } => "Picked up item.".to_owned(),
-            GameEvent::ItemUsed { .. } => "Used item.".to_owned(),
+            GameEvent::ItemUsed {
+                item_name, amount, ..
+            } => {
+                format!("Used {item_name} ({amount} HP).")
+            }
+            GameEvent::EffectLimitReached { limit } => {
+                format!("Effect processing stopped at {limit} operations.")
+            }
             GameEvent::FloorChanged { floor } => format!("Entered floor {floor}."),
             GameEvent::Message(text) => text,
             GameEvent::EntityMoved { .. } | GameEvent::TurnStarted { .. } => continue,
@@ -623,6 +643,7 @@ mod tests {
             position: Position { x: 7, y: 5 },
             glyph: 'r',
             name: "Rat".to_owned(),
+            health: None,
         }];
         let mut messages = VecDeque::new();
         record_events(
@@ -631,13 +652,19 @@ mod tests {
             vec![
                 GameEvent::TurnStarted { turn: 1 },
                 GameEvent::DamageTaken {
+                    source: Some(EntityId(0)),
                     target: rat_id,
+                    target_position: Position { x: 7, y: 5 },
                     amount: 1,
                     remaining_hp: 0,
                 },
-                GameEvent::EntityDied { entity: rat_id },
+                GameEvent::EntityDied {
+                    entity: rat_id,
+                    position: Position { x: 7, y: 5 },
+                },
                 GameEvent::EntityDied {
                     entity: EntityId(99),
+                    position: Position { x: 20, y: 20 },
                 },
                 GameEvent::Message("No stairs here.".to_owned()),
                 GameEvent::Victory,

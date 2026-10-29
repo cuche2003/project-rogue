@@ -61,7 +61,7 @@ fn custom_actor_spawns_with_mod_stats_and_behavior() {
     );
     assert!(engine.drain_events().iter().any(
         |event| matches!(event, project_rogue_engine_core::GameEvent::DamageTaken {
-            target, amount: 1, remaining_hp: 7
+            target, amount: 1, remaining_hp: 7, ..
         } if target.0 == 1)
     ));
     assert_eq!(engine.world().get::<Health>(enemy).unwrap().current, 7);

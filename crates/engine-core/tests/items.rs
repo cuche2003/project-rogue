@@ -1,7 +1,7 @@
 use project_rogue_engine_core::{
     ActorDefinition, BehaviorKind, Command, CommandError, CommandResult, ContentPack, Engine,
-    GameConfig, GridPosition, Health, ItemDefinition, ItemEffect, ItemSpawnDefinition, Player,
-    Position,
+    GameConfig, GameEvent, GridPosition, Health, ItemDefinition, ItemEffect, ItemSpawnDefinition,
+    Player, Position,
 };
 
 fn content(items: Vec<ItemDefinition>, item_spawns: Vec<ItemSpawnDefinition>) -> ContentPack {
@@ -82,8 +82,32 @@ fn custom_item_power_changes_healing() {
         .current = 2;
 
     assert_eq!(engine.dispatch(Command::Pickup), CommandResult::Applied);
+    let pickup = engine.drain_events();
+    let [GameEvent::ItemPickedUp { item }] = pickup.as_slice() else {
+        panic!("expected item pickup")
+    };
     assert_eq!(engine.dispatch(Command::UseItem(0)), CommandResult::Applied);
     assert_eq!(engine.snapshot().player.health.current, 9);
+    assert_eq!(
+        engine.drain_events(),
+        vec![
+            GameEvent::HealthRestored {
+                source: Some(project_rogue_engine_core::EntityId(0)),
+                target: project_rogue_engine_core::EntityId(0),
+                target_position: engine.player_position(),
+                amount: 7,
+                current_hp: 9,
+            },
+            GameEvent::ItemUsed {
+                item: *item,
+                item_id: "mod:strong-potion".to_owned(),
+                item_name: "Potion".to_owned(),
+                effect: ItemEffect::Heal,
+                target: project_rogue_engine_core::EntityId(0),
+                amount: 7,
+            },
+        ]
+    );
 }
 
 #[test]

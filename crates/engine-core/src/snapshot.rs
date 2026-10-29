@@ -34,6 +34,7 @@ pub struct EntitySnapshot {
     pub position: Position,
     pub glyph: char,
     pub name: String,
+    pub health: Option<HealthSnapshot>,
 }
 
 /// Item visible in player inventory or on the map.

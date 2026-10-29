@@ -450,10 +450,8 @@ impl Engine {
             return CommandResult::Applied;
         }
         let pending = self.drain_events();
-        let mut observed = self.observed_entities();
         self.world.insert_resource(TurnCommand(command));
         self.schedule.run(&mut self.world);
-        observed.extend(self.observed_entities());
         // Events share the snapshot's information boundary; hidden AI paths stay private.
         let map = &self.world.resource::<Map>().0;
         let sight = self.world.resource::<Visibility>();
@@ -466,8 +464,13 @@ impl Engine {
                 GameEvent::EntityMoved { entity, from, to } => {
                     *entity == self.player_id() || (sight.sees(map, *from) && sight.sees(map, *to))
                 }
-                GameEvent::DamageTaken { target, .. } => observed.contains(target),
-                GameEvent::EntityDied { entity } => observed.contains(entity),
+                GameEvent::DamageTaken {
+                    target_position, ..
+                }
+                | GameEvent::HealthRestored {
+                    target_position, ..
+                } => sight.sees(map, *target_position),
+                GameEvent::EntityDied { position, .. } => sight.sees(map, *position),
                 _ => true,
             })
             .cloned()
@@ -600,19 +603,6 @@ impl Engine {
             .push(GameEvent::FloorChanged { floor: next_floor });
     }
 
-    fn observed_entities(&self) -> std::collections::HashSet<EntityId> {
-        let sight = self.world.resource::<Visibility>();
-        let map = &self.world.resource::<Map>().0;
-        self.world
-            .iter_entities()
-            .filter_map(|entity| {
-                sight
-                    .sees(map, entity.get::<GridPosition>()?.0)
-                    .then_some(entity.get::<Identity>()?.0)
-            })
-            .collect()
-    }
-
     /// Returns ordered player-observable events since the last drain.
     /// Hidden actors' movement is omitted instead of exposing unseen coordinates.
     pub fn drain_events(&mut self) -> Vec<GameEvent> {
@@ -638,6 +628,10 @@ impl Engine {
                     position,
                     glyph: display.glyph,
                     name: display.name.clone(),
+                    health: entity.get::<Health>().map(|health| HealthSnapshot {
+                        current: health.current,
+                        maximum: health.maximum,
+                    }),
                 })
             })
             .collect();

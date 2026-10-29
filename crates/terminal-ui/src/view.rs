@@ -254,6 +254,10 @@ mod tests {
                 position,
                 glyph: '@',
                 name: "Player".to_owned(),
+                health: Some(HealthSnapshot {
+                    current: 10,
+                    maximum: 10,
+                }),
             }],
             items: vec![],
             inventory: vec![],
@@ -320,6 +324,7 @@ mod tests {
             position: Position { x: 6, y: 2 },
             glyph: 'r',
             name: "Rat".to_owned(),
+            health: None,
         });
         assert_eq!(render(&snapshot, 80, 24)[(7, 5)].symbol(), "r");
     }

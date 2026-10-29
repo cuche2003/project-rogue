@@ -19,16 +19,17 @@
       health: { current: number; maximum: number };
     };
     inventory: Item[];
-    messages: string[];
   };
 
   type Position = { x: number; y: number };
   type Entity = { position: Position; glyph: string; name: string; health?: { current: number; maximum: number } };
   type Item = { name: string; glyph: string; quantity: number; position: Position | null };
+  type GameEvent = Record<string, unknown>;
   type EngineModule = { default: () => Promise<void>; Engine: new () => { snapshot(): string; command(action: string): string } };
 
   let engine: InstanceType<EngineModule['Engine']> | undefined;
   let snapshot: Snapshot | undefined;
+  let messages: string[] = [];
   let error = '';
   let loading = true;
 
@@ -45,11 +46,31 @@
     }
   });
 
+  function describeEvent(event: GameEvent) {
+    if ('AttackResolved' in event) {
+      const attack = event.AttackResolved as { hit: boolean; attack_power: number; defense: number };
+      return `${attack.hit ? 'Hit' : 'Miss'}: ${attack.attack_power} vs ${attack.defense}`;
+    }
+    if ('DamageTaken' in event) {
+      const damage = event.DamageTaken as { amount: number; remaining_hp: number };
+      return `Damage: ${damage.amount} (${damage.remaining_hp} HP left)`;
+    }
+    if ('EntityDied' in event) return 'Enemy defeated.';
+    if ('Defeat' in event) return 'Defeat. Press r to restart.';
+    if ('Victory' in event) return 'Victory! Press r to restart.';
+    if ('FloorChanged' in event) return `Entered floor ${(event.FloorChanged as { floor: number }).floor}.`;
+    if ('ItemPickedUp' in event) return 'Picked up item.';
+    if ('ItemUsed' in event) return `Used item (${(event.ItemUsed as { amount: number }).amount} HP).`;
+    if ('Message' in event) return String(event.Message);
+    return '';
+  }
+
   function send(action: string) {
     if (!engine) return;
     try {
-      const response = JSON.parse(engine.command(action)) as { snapshot: Snapshot };
+      const response = JSON.parse(engine.command(action)) as { snapshot: Snapshot; events: GameEvent[] };
       snapshot = response.snapshot;
+      messages = [...messages, ...response.events.map(describeEvent).filter(Boolean)].slice(-24);
     } catch (reason) {
       error = reason instanceof Error ? reason.message : String(reason);
     }
@@ -134,7 +155,7 @@
         <div class="panel log-panel">
           <div class="panel-title">COMBAT LOG</div>
           <div class="log">
-            {#each snapshot.messages.slice(-8).reverse() as message}
+            {#each messages.slice(-8).reverse() as message}
               <p>{message}</p>
             {:else}
               <p class="muted">No events yet.</p>

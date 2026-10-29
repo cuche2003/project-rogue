@@ -1,0 +1,15 @@
+{
+  "name": "project-rogue-engine-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "project_rogue_engine_wasm_bg.wasm",
+    "project_rogue_engine_wasm.js",
+    "project_rogue_engine_wasm.d.ts"
+  ],
+  "main": "project_rogue_engine_wasm.js",
+  "types": "project_rogue_engine_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

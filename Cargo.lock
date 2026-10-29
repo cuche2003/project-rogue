@@ -1221,6 +1221,8 @@ name = "project-rogue-engine-wasm"
 version = "0.1.0"
 dependencies = [
  "project-rogue-engine-core",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
 ]
 

@@ -10,6 +10,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 project-rogue-engine-core = { path = "../engine-core" }
+serde.workspace = true
+serde_json.workspace = true
 wasm-bindgen.workspace = true
 
 [lints]

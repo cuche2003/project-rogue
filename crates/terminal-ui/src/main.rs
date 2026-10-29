@@ -401,6 +401,28 @@ fn record_events(
 ) {
     for event in events {
         let message = match event {
+            GameEvent::AttackResolved {
+                source,
+                target,
+                attack_power,
+                defense,
+                hit,
+                ..
+            } => {
+                let source_name = before
+                    .iter()
+                    .find(|entity| entity.id == source)
+                    .map_or("Entity", |entity| entity.name.as_str());
+                let target_name = before
+                    .iter()
+                    .find(|entity| entity.id == target)
+                    .map_or("Entity", |entity| entity.name.as_str());
+                if hit {
+                    format!("{source_name} hits {target_name} ({attack_power} vs {defense}).")
+                } else {
+                    format!("{source_name} misses {target_name} ({attack_power} vs {defense}).")
+                }
+            }
             GameEvent::DamageTaken {
                 target,
                 amount,
@@ -651,6 +673,14 @@ mod tests {
             &before,
             vec![
                 GameEvent::TurnStarted { turn: 1 },
+                GameEvent::AttackResolved {
+                    source: EntityId(0),
+                    target: rat_id,
+                    target_position: Position { x: 7, y: 5 },
+                    attack_power: 1,
+                    defense: 0,
+                    hit: true,
+                },
                 GameEvent::DamageTaken {
                     source: Some(EntityId(0)),
                     target: rat_id,
@@ -674,6 +704,7 @@ mod tests {
         assert_eq!(
             messages,
             [
+                "Entity hits Rat (1 vs 0).",
                 "Rat takes 1 damage (0 HP left).",
                 "Rat died.",
                 "Entity died.",

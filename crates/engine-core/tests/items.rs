@@ -12,6 +12,7 @@ fn content(items: Vec<ItemDefinition>, item_spawns: Vec<ItemSpawnDefinition>) ->
             glyph: '@',
             max_health: 10,
             attack_damage: 1,
+            defense: 0,
             behavior: BehaviorKind::Passive,
         }],
         vec![],

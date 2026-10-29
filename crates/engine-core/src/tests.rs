@@ -154,6 +154,38 @@ fn effect_resolver_stops_at_work_limit() {
 }
 
 #[test]
+fn attack_miss_emits_resolution_without_damage() {
+    let mut engine = adjacent_enemy_game();
+    let enemy = enemy(&mut engine);
+    engine.world.entity_mut(enemy).insert(Defense(2));
+    assert_eq!(
+        engine.dispatch(Command::Move(Direction::Right)),
+        CommandResult::Applied
+    );
+    let events = engine.drain_events();
+    assert!(matches!(
+        events.first(),
+        Some(GameEvent::AttackResolved {
+            source: EntityId(0),
+            target: EntityId(1),
+            attack_power: 1,
+            defense: 2,
+            hit: false,
+            ..
+        })
+    ));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        GameEvent::DamageTaken {
+            source: Some(EntityId(0)),
+            target: EntityId(1),
+            ..
+        }
+    )));
+    assert_eq!(engine.world.get::<Health>(enemy).unwrap().current, 3);
+}
+
+#[test]
 fn player_damage_cleanup_precedes_enemy_response_and_death_frees_tile() {
     let mut engine = adjacent_enemy_game();
     for hp in [2, 1] {
@@ -165,12 +197,28 @@ fn player_damage_cleanup_precedes_enemy_response_and_death_frees_tile() {
         assert_eq!(
             engine.drain_events(),
             vec![
+                GameEvent::AttackResolved {
+                    source: EntityId(0),
+                    target: EntityId(1),
+                    target_position: Position { x: 3, y: 2 },
+                    attack_power: 1,
+                    defense: 0,
+                    hit: true,
+                },
                 GameEvent::DamageTaken {
                     source: Some(EntityId(0)),
                     target: EntityId(1),
                     target_position: Position { x: 3, y: 2 },
                     amount: 1,
                     remaining_hp: hp
+                },
+                GameEvent::AttackResolved {
+                    source: EntityId(1),
+                    target: EntityId(0),
+                    target_position: Position { x: 2, y: 2 },
+                    attack_power: 1,
+                    defense: 0,
+                    hit: true,
                 },
                 GameEvent::DamageTaken {
                     source: Some(EntityId(1)),
@@ -186,6 +234,14 @@ fn player_damage_cleanup_precedes_enemy_response_and_death_frees_tile() {
     assert_eq!(
         engine.drain_events(),
         vec![
+            GameEvent::AttackResolved {
+                source: EntityId(0),
+                target: EntityId(1),
+                target_position: Position { x: 3, y: 2 },
+                attack_power: 1,
+                defense: 0,
+                hit: true,
+            },
             GameEvent::DamageTaken {
                 source: Some(EntityId(0)),
                 target: EntityId(1),
@@ -209,12 +265,45 @@ fn player_damage_cleanup_precedes_enemy_response_and_death_frees_tile() {
 }
 
 #[test]
+fn lethal_player_attack_skips_enemy_retaliation() {
+    let mut engine = adjacent_enemy_game();
+    let enemy = enemy(&mut engine);
+    engine.world.get_mut::<Health>(enemy).unwrap().current = 1;
+    let player_health = engine.world.get::<Health>(engine.player).unwrap().current;
+    assert_eq!(
+        engine.dispatch(Command::Move(Direction::Right)),
+        CommandResult::Applied
+    );
+    let events = engine.drain_events();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        GameEvent::EntityDied {
+            entity: EntityId(1),
+            ..
+        }
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        GameEvent::DamageTaken {
+            source: Some(EntityId(1)),
+            target: EntityId(0),
+            ..
+        }
+    )));
+    assert_eq!(
+        engine.world.get::<Health>(engine.player).unwrap().current,
+        player_health
+    );
+}
+
+#[test]
 fn defeat_stops_remaining_enemies_and_rejects_future_turns() {
     let mut engine = adjacent_enemy_game();
     engine.world.spawn((
         Enemy,
         Behavior(BehaviorKind::Chase),
         AttackDamage(1),
+        Defense(0),
         Identity(EntityId(2)),
         GridPosition(Position { x: 2, y: 3 }),
         Health {
@@ -232,6 +321,14 @@ fn defeat_stops_remaining_enemies_and_rejects_future_turns() {
     assert_eq!(
         engine.drain_events(),
         vec![
+            GameEvent::AttackResolved {
+                source: EntityId(1),
+                target: EntityId(0),
+                target_position: Position { x: 2, y: 2 },
+                attack_power: 1,
+                defense: 0,
+                hit: true,
+            },
             GameEvent::DamageTaken {
                 source: Some(EntityId(1)),
                 target: EntityId(0),
@@ -296,6 +393,7 @@ fn enemy_order_uses_stable_identity_not_spawn_order() {
             Enemy,
             Behavior(BehaviorKind::Chase),
             AttackDamage(1),
+            Defense(0),
             Identity(EntityId(id)),
             GridPosition(position),
             BlocksMovement,

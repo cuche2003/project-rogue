@@ -15,8 +15,8 @@ mod visibility;
 
 pub use command::{Command, CommandError, CommandResult};
 pub use components::{
-    AttackDamage, Behavior, BlocksMovement, Display, Enemy, GridPosition, Health, Identity, Item,
-    Player,
+    AttackDamage, Behavior, BlocksMovement, Defense, Display, Enemy, GridPosition, Health,
+    Identity, Item, Player,
 };
 pub use content::{
     ActorDefinition, BehaviorKind, ContentError, ContentPack, ItemDefinition, ItemEffect,
@@ -308,6 +308,7 @@ impl Engine {
                     maximum: player_content.max_health,
                 },
                 AttackDamage(player_content.attack_damage),
+                Defense(player_content.defense),
                 Display {
                     glyph: player_content.glyph,
                     name: player_content.name.clone(),
@@ -327,6 +328,7 @@ impl Engine {
                     Enemy,
                     Behavior(actor.behavior),
                     AttackDamage(actor.attack_damage),
+                    Defense(actor.defense),
                     Identity(ids.allocate()),
                     GridPosition(position),
                     Health {
@@ -464,7 +466,10 @@ impl Engine {
                 GameEvent::EntityMoved { entity, from, to } => {
                     *entity == self.player_id() || (sight.sees(map, *from) && sight.sees(map, *to))
                 }
-                GameEvent::DamageTaken {
+                GameEvent::AttackResolved {
+                    target_position, ..
+                }
+                | GameEvent::DamageTaken {
                     target_position, ..
                 }
                 | GameEvent::HealthRestored {
@@ -563,6 +568,7 @@ impl Engine {
                     Enemy,
                     Behavior(actor.behavior),
                     AttackDamage(actor.attack_damage),
+                    Defense(actor.defense),
                     Identity(ids.allocate()),
                     GridPosition(position),
                     Health {

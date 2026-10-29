@@ -5,7 +5,7 @@ use project_rogue_engine_core::{
 
 const MOD_CONTENT: &str = r#"(
     actors: [
-        (id: "core:player", name: "Player", glyph: '@', max_health: 10, attack_damage: 1, behavior: Passive),
+        (id: "core:player", name: "Player", glyph: '@', max_health: 10, attack_damage: 1, defense: 0, behavior: Passive),
         (id: "mod:brute", name: "Brute", glyph: 'B', max_health: 8, attack_damage: 3, behavior: Guard),
     ],
     spawns: [(actor_id: "mod:brute", count: 1)],
@@ -59,11 +59,18 @@ fn custom_actor_spawns_with_mod_stats_and_behavior() {
         engine.dispatch(Command::Move(Direction::Right)),
         CommandResult::Applied
     );
-    assert!(engine.drain_events().iter().any(
-        |event| matches!(event, project_rogue_engine_core::GameEvent::DamageTaken {
-            target, amount: 1, remaining_hp: 7, ..
+    let events = engine.drain_events();
+    assert!(events.iter().any(
+        |event| matches!(event, project_rogue_engine_core::GameEvent::AttackResolved {
+            target, attack_power: 1, defense: 0, hit: true, ..
         } if target.0 == 1)
     ));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        project_rogue_engine_core::GameEvent::DamageTaken {
+            target, amount: 1, remaining_hp: 7, ..
+        } if target.0 == 1
+    )));
     assert_eq!(engine.world().get::<Health>(enemy).unwrap().current, 7);
 }
 

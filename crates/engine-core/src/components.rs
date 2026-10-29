@@ -22,6 +22,10 @@ pub struct GridPosition(pub Position);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 pub struct AttackDamage(pub u32);
 
+/// Defense threshold checked by basic attacks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct Defense(pub u32);
+
 /// AI behavior selected by actor content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 pub struct Behavior(pub crate::BehaviorKind);

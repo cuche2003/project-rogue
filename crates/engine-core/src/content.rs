@@ -14,6 +14,8 @@ pub struct ActorDefinition {
     pub glyph: char,
     pub max_health: u32,
     pub attack_damage: u32,
+    #[serde(default)]
+    pub defense: u32,
     pub behavior: BehaviorKind,
 }
 

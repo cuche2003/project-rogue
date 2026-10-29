@@ -29,7 +29,7 @@ Replays start paused. Space or Enter dispatches exactly one recorded command; ga
 
 Controls: arrows or `hjkl` move and bump-attack; `.` or Space waits; `g` picks up items; `1`-`9` uses inventory items; `>` descends; `r` restarts; `q` or `Esc` quits.
 
-Explore seeded rooms and corridors as player (`@`), survive rats (`r`), and find stairs (`>`). Stand on stairs and press `>` to descend and win. Losing all HP ends the run in defeat. Each accepted move, attack, or wait gives enemies a turn; blocked moves do not spend a turn. HUD shows HP, turn count, and objective; log records messages, damage, deaths, and victory or defeat.
+Explore seeded rooms and corridors as player (`@`), survive rats (`r`), and find stairs (`>`). Stand on stairs and press `>` to descend and win. Losing all HP ends the run in defeat. Bump attacks use `attack_power >= defense`: every resolved attack logs hit or miss, and only hits deal base `AttackDamage`. Each accepted move, attack, or wait gives enemies a turn; blocked moves do not spend a turn. HUD shows HP, turn count, and objective; log records attacks, damage, deaths, and victory or defeat.
 
 Successful descent ends the run immediately without enemy retaliation. Core runs ordered Bevy ECS stages: player action, cleanup of enemies killed by the player, enemy actions, cleanup, outcome, visibility. Enemy pathfinding uses a shared deterministic distance field and stable entity ordering.
 

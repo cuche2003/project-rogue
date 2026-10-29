@@ -11,6 +11,14 @@ pub enum GameEvent {
         from: Position,
         to: Position,
     },
+    AttackResolved {
+        source: EntityId,
+        target: EntityId,
+        target_position: Position,
+        attack_power: u32,
+        defense: u32,
+        hit: bool,
+    },
     DamageTaken {
         source: Option<EntityId>,
         target: EntityId,

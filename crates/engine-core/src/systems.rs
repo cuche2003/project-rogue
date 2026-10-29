@@ -4,8 +4,8 @@ use bevy_ecs::prelude::*;
 
 use crate::resources::INVENTORY_SLOTS;
 use crate::{
-    AttackDamage, Behavior, BlocksMovement, Command, CommandError, Direction, Enemy, GameEvent,
-    GamePhase, GridPosition, Health, Identity, Map, Phase, Position, Tile, Turn,
+    AttackDamage, Behavior, BlocksMovement, Command, CommandError, Defense, Direction, Enemy,
+    GameEvent, GamePhase, GridPosition, Health, Identity, Map, Phase, Position, Tile, Turn,
     resources::{
         Content, Events, GroundItems, Inventory, InventoryEntry, PlayerEntity, TurnCommand,
     },
@@ -310,17 +310,41 @@ pub(crate) fn resolve_effects(world: &mut World, initial: impl IntoIterator<Item
 }
 
 fn damage(world: &mut World, attacker: Entity, target: Entity) {
-    let amount = world
+    let attack_power = world
         .get::<AttackDamage>(attacker)
         .map_or(1, |damage| damage.0);
-    resolve_effects(
-        world,
-        [EffectWork::Damage {
-            source: Some(attacker),
-            target,
-            amount,
-        }],
-    );
+    let Some(source) = world.get::<Identity>(attacker).map(|identity| identity.0) else {
+        return;
+    };
+    let Some(target_id) = world.get::<Identity>(target).map(|identity| identity.0) else {
+        return;
+    };
+    let Some(target_position) = world.get::<GridPosition>(target).map(|position| position.0) else {
+        return;
+    };
+    let defense = world.get::<Defense>(target).map_or(0, |defense| defense.0);
+    let hit = attack_power >= defense;
+    world
+        .resource_mut::<Events>()
+        .0
+        .push(GameEvent::AttackResolved {
+            source,
+            target: target_id,
+            target_position,
+            attack_power,
+            defense,
+            hit,
+        });
+    if hit {
+        resolve_effects(
+            world,
+            [EffectWork::Damage {
+                source: Some(attacker),
+                target,
+                amount: attack_power,
+            }],
+        );
+    }
 }
 
 fn player_action(world: &mut World) {

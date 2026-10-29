@@ -186,6 +186,41 @@ fn attack_miss_emits_resolution_without_damage() {
 }
 
 #[test]
+fn attack_equal_to_defense_is_a_hit() {
+    let mut engine = adjacent_enemy_game();
+    let enemy = enemy(&mut engine);
+    engine.world.entity_mut(enemy).insert(Defense(1));
+
+    assert_eq!(
+        engine.dispatch(Command::Move(Direction::Right)),
+        CommandResult::Applied
+    );
+    let events = engine.drain_events();
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        GameEvent::AttackResolved {
+            source: EntityId(0),
+            target: EntityId(1),
+            attack_power: 1,
+            defense: 1,
+            hit: true,
+            ..
+        }
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        GameEvent::DamageTaken {
+            source: Some(EntityId(0)),
+            target: EntityId(1),
+            amount: 1,
+            remaining_hp: 2,
+            ..
+        }
+    )));
+}
+
+#[test]
 fn player_damage_cleanup_precedes_enemy_response_and_death_frees_tile() {
     let mut engine = adjacent_enemy_game();
     for hp in [2, 1] {

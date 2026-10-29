@@ -13,6 +13,7 @@ fn content(items: Vec<ItemDefinition>, item_spawns: Vec<ItemSpawnDefinition>) ->
             max_health: 10,
             attack_damage: 1,
             defense: 0,
+            resistance: 0,
             behavior: BehaviorKind::Passive,
         }],
         vec![],

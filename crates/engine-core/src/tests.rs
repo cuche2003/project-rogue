@@ -221,6 +221,61 @@ fn attack_equal_to_defense_is_a_hit() {
 }
 
 #[test]
+fn damage_resistance_reduces_damage_and_clamps_at_zero() {
+    let mut engine = adjacent_enemy_game();
+    let enemy_entity = enemy(&mut engine);
+    engine
+        .world
+        .entity_mut(enemy_entity)
+        .insert(DamageResistance(1));
+
+    systems::resolve_effects(
+        &mut engine.world,
+        [systems::EffectWork::Damage {
+            source: Some(engine.player),
+            target: enemy_entity,
+            amount: 3,
+        }],
+    );
+
+    assert_eq!(engine.world.get::<Health>(enemy_entity).unwrap().current, 1);
+    assert!(engine.drain_events().iter().any(|event| matches!(
+        event,
+        GameEvent::DamageTaken {
+            amount: 2,
+            remaining_hp: 1,
+            ..
+        }
+    )));
+
+    let mut engine = adjacent_enemy_game();
+    let enemy_entity = enemy(&mut engine);
+    engine
+        .world
+        .entity_mut(enemy_entity)
+        .insert(DamageResistance(5));
+
+    systems::resolve_effects(
+        &mut engine.world,
+        [systems::EffectWork::Damage {
+            source: Some(engine.player),
+            target: enemy_entity,
+            amount: 3,
+        }],
+    );
+
+    assert_eq!(engine.world.get::<Health>(enemy_entity).unwrap().current, 3);
+    assert!(engine.drain_events().iter().any(|event| matches!(
+        event,
+        GameEvent::DamageTaken {
+            amount: 0,
+            remaining_hp: 3,
+            ..
+        }
+    )));
+}
+
+#[test]
 fn player_damage_cleanup_precedes_enemy_response_and_death_frees_tile() {
     let mut engine = adjacent_enemy_game();
     for hp in [2, 1] {
@@ -339,6 +394,7 @@ fn defeat_stops_remaining_enemies_and_rejects_future_turns() {
         Behavior(BehaviorKind::Chase),
         AttackDamage(1),
         Defense(0),
+        DamageResistance(0),
         Identity(EntityId(2)),
         GridPosition(Position { x: 2, y: 3 }),
         Health {
@@ -429,6 +485,7 @@ fn enemy_order_uses_stable_identity_not_spawn_order() {
             Behavior(BehaviorKind::Chase),
             AttackDamage(1),
             Defense(0),
+            DamageResistance(0),
             Identity(EntityId(id)),
             GridPosition(position),
             BlocksMovement,

@@ -16,6 +16,8 @@ pub struct ActorDefinition {
     pub attack_damage: u32,
     #[serde(default)]
     pub defense: u32,
+    #[serde(default)]
+    pub resistance: u32,
     pub behavior: BehaviorKind,
 }
 

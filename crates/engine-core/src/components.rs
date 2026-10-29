@@ -26,6 +26,10 @@ pub struct AttackDamage(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 pub struct Defense(pub u32);
 
+/// Flat damage absorbed by basic attacks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct DamageResistance(pub u32);
+
 /// AI behavior selected by actor content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
 pub struct Behavior(pub crate::BehaviorKind);

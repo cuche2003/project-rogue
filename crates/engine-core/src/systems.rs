@@ -4,8 +4,9 @@ use bevy_ecs::prelude::*;
 
 use crate::resources::INVENTORY_SLOTS;
 use crate::{
-    AttackDamage, Behavior, BlocksMovement, Command, CommandError, Defense, Direction, Enemy,
-    GameEvent, GamePhase, GridPosition, Health, Identity, Map, Phase, Position, Tile, Turn,
+    AttackDamage, Behavior, BlocksMovement, Command, CommandError, DamageResistance, Defense,
+    Direction, Enemy, GameEvent, GamePhase, GridPosition, Health, Identity, Map, Phase, Position,
+    Tile, Turn,
     resources::{
         Content, Events, GroundItems, Inventory, InventoryEntry, PlayerEntity, TurnCommand,
     },
@@ -205,6 +206,10 @@ pub(crate) fn resolve_effects(world: &mut World, initial: impl IntoIterator<Item
                 target,
                 amount,
             } => {
+                let resistance = world
+                    .get::<DamageResistance>(target)
+                    .map_or(0, |resistance| resistance.0);
+                let amount = amount.saturating_sub(resistance);
                 let Some((id, position, remaining_hp)) = world
                     .get::<Identity>(target)
                     .zip(world.get::<GridPosition>(target))

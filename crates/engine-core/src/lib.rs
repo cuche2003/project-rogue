@@ -15,8 +15,8 @@ mod visibility;
 
 pub use command::{Command, CommandError, CommandResult};
 pub use components::{
-    AttackDamage, Behavior, BlocksMovement, Defense, Display, Enemy, GridPosition, Health,
-    Identity, Item, Player,
+    AttackDamage, Behavior, BlocksMovement, DamageResistance, Defense, Display, Enemy,
+    GridPosition, Health, Identity, Item, Player,
 };
 pub use content::{
     ActorDefinition, BehaviorKind, ContentError, ContentPack, ItemDefinition, ItemEffect,
@@ -309,6 +309,7 @@ impl Engine {
                 },
                 AttackDamage(player_content.attack_damage),
                 Defense(player_content.defense),
+                DamageResistance(player_content.resistance),
                 Display {
                     glyph: player_content.glyph,
                     name: player_content.name.clone(),
@@ -329,6 +330,7 @@ impl Engine {
                     Behavior(actor.behavior),
                     AttackDamage(actor.attack_damage),
                     Defense(actor.defense),
+                    DamageResistance(actor.resistance),
                     Identity(ids.allocate()),
                     GridPosition(position),
                     Health {
@@ -569,6 +571,7 @@ impl Engine {
                     Behavior(actor.behavior),
                     AttackDamage(actor.attack_damage),
                     Defense(actor.defense),
+                    DamageResistance(actor.resistance),
                     Identity(ids.allocate()),
                     GridPosition(position),
                     Health {
